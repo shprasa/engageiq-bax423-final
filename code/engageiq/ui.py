@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -529,6 +530,38 @@ def render_opportunity_card(
         if fb[3].button("✕ Skip", key=f"{key_prefix}_skip_{int(row['id'])}", use_container_width=True):
             st.session_state._pending_action = ("skip", row_dict)
             st.rerun()
+
+
+def render_rl_policy(agent) -> None:
+    """Show learned domain Q-values from the RL agent."""
+    from engageiq.reinforcement_learning import EngagementRLAgent
+
+    if not isinstance(agent, EngagementRLAgent) or agent.rounds == 0:
+        st.caption("RL policy: interact with opportunities (engage/bookmark/skip) to train the agent.")
+        return
+
+    summary = agent.summary()
+    st.markdown("**Reinforcement learning policy**")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("RL rounds", summary["rounds"])
+    c2.metric("Total reward", f"{summary['total_reward']:.2f}")
+    c3.metric("Avg reward", f"{summary['avg_reward']:.2f}")
+
+    top = agent.top_domains(8)
+    if top:
+        df = pd.DataFrame(top, columns=["domain", "q_value"])
+        chart = (
+            alt.Chart(df)
+            .mark_bar(color="#4F46E5")
+            .encode(
+                x=alt.X("q_value:Q", title="Learned Q-value (success rate)"),
+                y=alt.Y("domain:N", sort="-x"),
+                tooltip=["domain", "q_value"],
+            )
+            .properties(height=220)
+        )
+        st.altair_chart(chart, use_container_width=True)
+    st.caption(f"Policy: {summary['policy']} · entropy={summary['policy_entropy']:.2f}")
 
 
 def render_activity_log(filter_action: str | None = None) -> None:
