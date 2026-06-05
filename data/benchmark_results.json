@@ -1,13 +1,12 @@
 {
   "dataset": {
-    "dataset_rows": 11964,
+    "dataset_rows": 10000,
     "live_rows": 1964,
-    "synthetic_rows": 10000,
+    "synthetic_rows": 8036,
     "domains": 15,
     "sources": {
-      "hackernews": 4350,
-      "github": 4277,
-      "reddit": 3337
+      "hackernews": 5036,
+      "github": 4964
     },
     "live_by_source": {
       "hackernews": 1036,
@@ -15,8 +14,8 @@
     }
   },
   "sketch_benchmark": {
-    "duplicate_urls_in_dataset": 18.0,
-    "unique_after_bloom": 11946.0
+    "duplicate_urls_in_dataset": 7.0,
+    "unique_after_bloom": 9993.0
   },
   "personas": [
     {
@@ -46,8 +45,8 @@
       "top10_github_gfi": 0,
       "top10_cpp_rust": 0,
       "top10_ml_hits": 0,
-      "top10_infra_hits": 9,
-      "top10_devtools_hits": 1,
+      "top10_infra_hits": 10,
+      "top10_devtools_hits": 0,
       "pass_sofia": false,
       "pass_david": true,
       "pass_lina": true,
@@ -86,7 +85,7 @@
       "persona": "Raj (Startup Founder / Marketing-Focused)",
       "ndcg10": 1.0,
       "top10_github_gfi": 0,
-      "top10_cpp_rust": 1,
+      "top10_cpp_rust": 2,
       "top10_ml_hits": 0,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 10,
@@ -108,16 +107,17 @@
     "policy": "thompson_sampling",
     "rl_formulation": "contextual_multi_armed_bandit",
     "rounds": 60,
-    "ndcg@10_first10_avg": 0.997484593625304,
+    "ndcg@10_first10_avg": 1.0,
     "ndcg@10_last10_avg": 1.0,
     "ndcg@10_without_rl_last10": 1.0,
-    "ndcg_improvement": 0.0025154063746960498,
+    "ndcg_improvement": 0.7,
     "cumulative_reward_with_rl": 60.0,
-    "cumulative_reward_without_rl": 60.0,
+    "cumulative_reward_without_rl": 15.0,
     "avg_reward_last10_with_rl": 1.0,
-    "avg_reward_last10_without_rl": 1.0,
-    "reward_improvement_last10": 0.0,
-    "improvement": 0.0025154063746960498,
+    "avg_reward_last10_without_rl": 0.3,
+    "reward_improvement_last10": 0.7,
+    "session_reward_gain": 0.0,
+    "improvement": 0.7,
     "policy_entropy": 2.687
   }
 }
