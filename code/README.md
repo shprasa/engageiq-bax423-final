@@ -21,7 +21,7 @@ The app will:
 - **Dedup + sketches**: Bloom filter (dedup), Count-Min Sketch (trend counts), HyperLogLog (approx unique authors).
 - **Embeddings + similarity retrieval**: TF‑IDF + SVD embeddings (SentenceTransformers optional) + ANN via `NearestNeighbors`.
 - **Engagement scoring + multi-stage ranking**: candidate generation → scoring → reranking, metric reported (NDCG@K).
-- **Adaptive learning**: per-domain Thompson sampling + personalization vector updated from feedback; includes 50+ simulated rounds.
+- **Reinforcement learning**: contextual multi-armed bandit (`engageiq/reinforcement_learning.py`) — state=user profile, actions=domain arms, rewards from engage (+1.0) / bookmark (+0.85) / skip (0). Thompson sampling policy updates ranking; **RL Policy** tab shows Q-values and cumulative reward curve.
 - **Batch analytics**: DuckDB queries for trends, volumes, and distributions.
 - **Dashboard + brief export**: Streamlit UI + CSV export (and optional PDF).
 
