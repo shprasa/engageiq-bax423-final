@@ -1,0 +1,13 @@
+# Secrets & local env
+code/.env
+**/.env
+*.duckdb
+*.duckdb.wal
+__pycache__/
+.venv/
+venv/
+_tmp_engageiq_docx/
+
+# OS
+.DS_Store
+Thumbs.db
