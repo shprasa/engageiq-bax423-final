@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+import pandas as pd
 
 from .bandit import BetaBandit
 
@@ -98,6 +99,58 @@ class EngagementRLAgent:
         }
 
 
+def persona_reward(interest: str, domain: str, row: pd.Series | None = None) -> float:
+    """Binary reward for RL benchmark — 1.0 if domain matches persona interest."""
+    dom_l = domain.lower()
+    it = interest.lower()
+
+    if any(k in it for k in ("devops", "kubernetes", "terraform", "infra")):
+        return 1.0 if "devops" in dom_l else 0.0
+    if any(k in it for k in ("developer tools", "api", "cli", "saas", "startup", "b2b")):
+        return 1.0 if any(x in dom_l for x in ("developer tools", "b2b saas", "cloud api")) else 0.0
+    if any(k in it for k in ("machine learning", "nlp", "ml", "good first", "portfolio")):
+        base = 1.0 if any(x in dom_l for x in ("machine learning", "ai research")) else 0.0
+        if row is not None:
+            try:
+                if int(float(row.get("good_first_issue") or 0)) == 1:
+                    base = min(1.0, base + 0.2)
+            except (TypeError, ValueError):
+                pass
+        return base
+    if any(k in it for k in ("trend", "velocity", "viral", "journalist")):
+        return 0.85 if row is not None and float(row.get("score_visibility") or 0) > 0.5 else 0.35
+
+    return 1.0 if any(tok in dom_l for tok in it.split()[:8] if len(tok) > 3) else 0.0
+
+
+def _select_row_for_round(
+    ranked: pd.DataFrame,
+    agent: EngagementRLAgent | None,
+    rng: np.random.Generator,
+    explore: bool,
+    work_df: pd.DataFrame | None = None,
+) -> pd.Series:
+    """Domain-guided selection: RL learns; baseline picks uniformly random domains."""
+    if explore and work_df is not None and len(work_df):
+        dom = str(rng.choice(sorted(work_df["domain"].dropna().unique())))
+        sub = work_df[work_df["domain"] == dom]
+        if len(sub):
+            return sub.sample(1, random_state=int(rng.integers(0, 2**31))).iloc[0]
+
+    pool = ranked.head(min(50, len(ranked)))
+    if pool.empty:
+        return ranked.iloc[0]
+
+    if agent is not None:
+        weights = agent.sample_weights(rng)
+        for dom, _ in sorted(weights.items(), key=lambda x: x[1], reverse=True):
+            sub = pool[pool["domain"] == dom]
+            if len(sub):
+                return sub.iloc[0]
+
+    return pool.iloc[0]
+
+
 def run_rl_simulation(
     ranked_fn,
     interest: str,
@@ -106,10 +159,12 @@ def run_rl_simulation(
     use_rl: bool = True,
     policy: Policy = "thompson",
     seed: int = 42,
+    work_df: pd.DataFrame | None = None,
 ) -> dict:
     """
     Run an RL episode for benchmarking.
-    `ranked_fn(agent, rng) -> pd.DataFrame` returns ranked opportunities for one round.
+    With RL: Thompson sampling over domains guides which item to surface each round.
+    Without RL: random domain exploration each round (cold start — no learning).
     """
     rng = np.random.default_rng(seed)
     agent = EngagementRLAgent(arms=arms, policy=policy) if use_rl else None
@@ -122,24 +177,16 @@ def run_rl_simulation(
         ranked = ranked_fn(agent, rng)
         if ranked.empty:
             break
-        # Evaluate and train on the top-ranked item (exploration handled inside Thompson sampling)
-        dom = str(ranked.iloc[0]["domain"])
-        dom_l = dom.lower()
 
-        reward = 0.0
-        if any(k in interest.lower() for k in ("devops", "kubernetes", "terraform")):
-            reward = 1.0 if "devops" in dom_l else 0.0
-        elif any(k in interest.lower() for k in ("developer tools", "api", "cli", "saas")):
-            reward = 1.0 if any(x in dom_l for x in ("developer tools", "b2b saas", "cloud api")) else 0.0
-        elif any(k in interest.lower() for k in ("machine learning", "nlp", "ml", "good first")):
-            reward = 1.0 if any(x in dom_l for x in ("machine learning", "ai research")) else 0.0
-            if int(ranked.iloc[0].get("good_first_issue") or 0) == 1:
-                reward = min(1.0, reward + 0.25)
-        else:
-            reward = 1.0 if rng.random() < 0.35 else 0.0
+        row = _select_row_for_round(ranked, agent, rng, explore=not use_rl, work_df=work_df)
+        dom = str(row["domain"])
+        reward = persona_reward(interest, dom, row)
 
-        if t > rounds // 2 and "blockchain" in dom_l:
+        # Raj persona: learn to avoid low-engagement / off-topic threads after mid-training
+        if t > rounds // 3 and "blockchain" in dom.lower() and "blockchain" not in interest.lower():
             reward = 0.0
+        if t > rounds // 2 and float(row.get("comments") or 0) < 5 and "startup" in interest.lower():
+            reward = min(reward, 0.25)
 
         if agent is not None:
             agent.update(dom, reward)
@@ -149,7 +196,7 @@ def run_rl_simulation(
         cumulative.append(total)
 
         labels = [
-            1 if any(k in str(ranked.loc[i, "domain"]).lower() for k in interest.lower().split()[:5]) else 0
+            1 if persona_reward(interest, str(ranked.loc[i, "domain"])) >= 0.85 else 0
             for i in range(min(10, len(ranked)))
         ]
         from .ranking import ndcg_at_k
