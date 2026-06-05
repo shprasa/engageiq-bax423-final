@@ -50,18 +50,41 @@ def format_created(value) -> str:
         return "—"
 
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return default
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _has_value(value) -> bool:
+    try:
+        if value is None or pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        return bool(str(value).strip())
+    return str(value).strip() != ""
+
+
 def _is_github_issue(row: pd.Series) -> bool:
     url = str(row.get("url") or "").lower()
     if "/issues/" in url:
         return True
-    return int(row.get("good_first_issue") or 0) == 1 and str(row.get("source", "")).lower() == "github"
+    return _safe_int(row.get("good_first_issue")) == 1 and str(row.get("source", "")).lower() == "github"
 
 
 def opportunity_type_label(row: pd.Series) -> str:
     src = str(row.get("source", "")).lower()
     if src == "github":
         if _is_github_issue(row):
-            return "GitHub Issue · Good First Issue" if int(row.get("good_first_issue") or 0) == 1 else "GitHub Issue"
+            return "GitHub Issue · Good First Issue" if _safe_int(row.get("good_first_issue")) == 1 else "GitHub Issue"
         return "GitHub Repository"
     if src == "hackernews":
         url = str(row.get("url") or "")
@@ -158,9 +181,9 @@ def display_summary(row: pd.Series) -> str:
         stars = row.get("stars")
         issues = row.get("issues_open")
         bits = [f"Repository {row.get('community', title)}."]
-        if pd.notna(stars) and str(stars) != "":
+        if _has_value(stars):
             bits.append(f"{int(float(stars)):,} stars.")
-        if pd.notna(issues) and str(issues) != "":
+        if _has_value(issues):
             bits.append(f"{int(float(issues)):,} open issues.")
         bits.append("Browse issues and README to find a contribution entry point.")
         return " ".join(bits)
@@ -191,16 +214,16 @@ def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
     src = str(row.get("source", "")).lower()
 
     if src == "github":
-        if pd.notna(row.get("stars")) and str(row.get("stars")) != "":
+        if _has_value(row.get("stars")):
             facts.append(("Stars", f"{int(float(row['stars'])):,}"))
-        if pd.notna(row.get("forks")) and str(row.get("forks")) != "":
+        if _has_value(row.get("forks")):
             facts.append(("Forks", f"{int(float(row['forks'])):,}"))
-        if pd.notna(row.get("issues_open")) and str(row.get("issues_open")) != "":
+        if _has_value(row.get("issues_open")):
             facts.append(("Open issues", f"{int(float(row['issues_open'])):,}"))
         lang = str(row.get("lang") or "").strip()
         if lang:
             facts.append(("Language", lang))
-        if int(row.get("good_first_issue") or 0) == 1:
+        if _safe_int(row.get("good_first_issue")) == 1:
             facts.append(("Contribution", "Good first issue"))
     elif src == "hackernews":
         facts.append(("Points", f"{int(float(row.get('upvotes') or 0)):,}"))
@@ -225,7 +248,7 @@ def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
 
 def estimated_engagement_time(row: pd.Series) -> str:
     effort = float(row.get("score_effort") or 0.5)
-    if int(row.get("good_first_issue") or 0) == 1:
+    if _safe_int(row.get("good_first_issue")) == 1:
         return "< 1 hour (good first issue)"
     if effort < 0.35:
         return "< 1 hour"
