@@ -15,9 +15,21 @@ class Paths:
     duckdb_path: Path
 
 
+def _is_cloud_runtime() -> bool:
+    """Detect Streamlit Cloud / other read-only container mounts."""
+    if os.getenv("STREAMLIT_RUNTIME_ENV") == "cloud":
+        return True
+    if os.getenv("STREAMLIT_CLOUD"):
+        return True
+    cwd = str(Path.cwd())
+    if cwd.startswith("/mount"):
+        return True
+    return False
+
+
 def _writable_duckdb_path(data_dir: Path) -> Path:
-    """Streamlit Cloud mounts the repo read-only; use /tmp for DuckDB."""
-    if os.getenv("STREAMLIT_CLOUD") or os.getenv("STREAMLIT_RUNTIME_ENV") == "cloud":
+    """Streamlit Cloud repo is read-only — DuckDB must live in /tmp."""
+    if _is_cloud_runtime():
         return Path(tempfile.gettempdir()) / "engageiq.duckdb"
 
     target = data_dir / "engageiq.duckdb"
