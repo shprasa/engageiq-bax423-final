@@ -26,7 +26,7 @@ from engageiq.secrets import load_env
 OWNER = "shprasa"
 REPO = "engageiq-bax423-final"
 BRANCH = "main"
-COMMIT_MSG = "Replace Hacker News with GitHub Archive as second data source"
+COMMIT_MSG = "Refresh brief, prompts, rubric docs, and submission ZIP for Canvas"
 
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "_tmp_engageiq_docx", ".cursor"}
 SKIP_NAMES = {".env", "engageiq.duckdb", "engageiq.duckdb.wal", "Thumbs.db", ".DS_Store"}

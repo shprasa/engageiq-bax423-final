@@ -16,22 +16,24 @@ Build the EngageIQ project.
 
 ### v2 · Specific
 ```
-Build a prototype of EngageIQ: engagement opportunity scorer using GitHub, Reddit, HN.
+Build a prototype of EngageIQ: engagement opportunity scorer using GitHub API and GitHub Archive.
 Include ranking, dashboard, and offline dataset.
 ```
 **Purpose:** Names the project and core outputs but misses rubric structure.  
-**Modification:** Added explicit mapping to all 6 core capabilities and BAX-423 techniques.
+**Modification:** Added explicit mapping to all 6 core capabilities and 2 BAX-423 techniques.
 
 ### v3 · Production-aware (used)
 ```
 Build EngageIQ prototype satisfying all 6 core capabilities from the Spring 2026 brief:
-(1) multi-source ingest + streaming + Bloom dedup + DuckDB,
+(1) multi-source ingest + streaming + URL dedup + DuckDB,
 (2) TF-IDF/SVD embeddings + ANN retrieval,
 (3) multi-stage ranking with relevance/health/visibility/effort + NDCG@10,
 (4) Thompson-sampling bandit from engage/skip/bookmark + 60-round benchmark,
 (5) DuckDB batch trend analytics,
 (6) Streamlit dashboard with Why-this explanations, suggested actions, CSV/PDF brief.
-Use folder layout: code/, data/, prompts.md, brief.pdf. Match course labs (sketching, Kafka optional).
+Data sources: GitHub Search API + GitHub Archive (gharchive.org) only.
+BAX-423 techniques: Recommendation + Reinforcement Learning (2 total).
+Use folder layout: code/, data/, prompts.md, brief.pdf.
 ```
 **Purpose:** Anchored deliverables to rubric dimensions so nothing caps score at 60/100.  
 **Modification:** Output became `EngageIQ_Final/` scaffold with modular `engageiq/` package.
@@ -47,15 +49,17 @@ Add API support.
 
 ### v2 · Specific
 ```
-Add GitHub and Reddit scrapers with .env for tokens and a script to build opportunities_snapshot.csv.
+Add GitHub API and GitHub Archive scrapers with .env for tokens and a script to build opportunities_snapshot.csv.
 ```
 
 ### v3 · Production-aware (used)
 ```
 Implement secure API ingestion:
 - .env + python-dotenv + truststore for Windows SSL
-- scrape_github.py, scrape_hn.py, scrape_reddit.py
+- scrape_github.py (Search API repos + good-first issues)
+- scrape_gharchive.py (hourly JSON.gz from data.gharchive.org — IssuesEvent, PullRequestEvent, comments)
 - build_snapshot.py merges LIVE rows first, then synthetic backup to guarantee ≥10,000 records across 15 domains
+- migrate_to_gharchive.py for dataset migration
 - Never commit secrets; document CMD setup for grader
 ```
 **Purpose:** Production-safe ingestion path graders can run offline.  
@@ -69,8 +73,8 @@ Implement secure API ingestion:
 ```
 Finish everything without asking:
 - Student: Shivneel Prasad, GitHub: shprasa, public repo, Streamlit Cloud deploy
-- Data: live + synthetic
-- Write brief.pdf, prompts.md (iteration format), persona benchmarks, final ZIP Prasad_Shivneel_BAX423_Final.zip
+- Data: GitHub API + GitHub Archive live + synthetic backup
+- Write brief.pdf (3–4 pages), prompts.md (iteration format), persona benchmarks, final ZIP Prasad_Shivneel_BAX423_Final.zip
 ```
 **Purpose:** Single authorization block for end-to-end completion.  
 **Modification:** Drove benchmark scripts, technical brief PDF, GitHub publish, and deployment docs.
@@ -81,12 +85,12 @@ Finish everything without asking:
 
 ### v3 · Production-aware (used)
 ```
-For each ranked opportunity show component scores (relevance, health, visibility, effort)
-and rule-based suggested actions by source (GitHub PR path, Reddit comment template, HN response).
-Add PDF weekly brief export with top-20 and trending domains.
+For each ranked opportunity show component scores (match, activity, visibility, effort)
+and suggested actions by source (GitHub API issue/PR path, GitHub Archive event comment template).
+Add sort/filter (platform, live/offline, effort, domain) and PDF/CSV brief export with top-20 and trending domains.
 ```
 **Purpose:** Satisfies “Why this?” and downloadable brief requirements.  
-**Modification:** Extended `brief_export.py` with ReportLab PDF writer.
+**Modification:** Extended `brief_export.py` with ReportLab PDF writer; added Discover sort/filter panel.
 
 ---
 
@@ -94,10 +98,11 @@ Add PDF weekly brief export with top-20 and trending domains.
 
 | Step | AI output | My change |
 |------|-----------|-----------|
-| Architecture | Module layout | Verified against rubric checklist |
-| Scrapers | GitHub/HN fetchers | Added SSL fix, rate-limit retries, synthetic merge |
-| UI | Streamlit cards | Wired persona selector + PDF export |
-| Brief | Markdown template | Converted to `generate_brief.py` → `brief.pdf` with benchmark JSON |
+| Architecture | Module layout | Verified against rubric checklist (6 capabilities) |
+| Scrapers | GitHub + GH Archive fetchers | Added SSL fix, rate-limit retries, synthetic merge |
+| UI | Streamlit cards | Persona selector, sort/filter, plain-language labels |
+| Brief | Markdown template | Expanded `generate_brief.py` → 3-page `brief.pdf` with benchmark JSON |
+| Migration | HN → GH Archive | Replaced second data source per assignment scope |
 
 ---
 

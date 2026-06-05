@@ -3,7 +3,7 @@
 **Student:** Shivneel Prasad · **URL:** https://engageiq-bax423-final.streamlit.app/
 
 ## 1. Problem (30 sec)
-EngageIQ helps professionals decide *where* to invest limited time online — ranking engagement opportunities from GitHub and Hacker News by relevance, community health, visibility, and effort.
+EngageIQ helps professionals decide *where* to invest limited time online — ranking engagement opportunities from the **GitHub API** and **GitHub Archive** by relevance, community health, visibility, and effort.
 
 ## 2. Data + ingest (1 min)
 - Show **10,000-record snapshot** (1,964 live GitHub + HN, **15 domains**)

@@ -1,2 +1,2 @@
-# Bump to trigger Streamlit Cloud redeploy from latest GitHub commit.
-deploy_trigger=2026-06-05T23:30:00Z-gharchive-migration
+# Bump to trigger Streamlit Cloud redeploy — submission refresh Jun 5 2026
+deploy_trigger=2026-06-05T23:55:00Z-submission-refresh
