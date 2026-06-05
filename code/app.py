@@ -14,10 +14,13 @@ from engageiq.reinforcement_learning import EngagementRLAgent
 from engageiq.brief_export import BriefConfig, export_brief_csv, export_brief_pdf
 from engageiq.config import get_paths
 from engageiq.data import OpportunityStore
-from engageiq.data_utils import display_title, is_live_url, live_mask, ranking_corpus
+from engageiq.data_utils import _safe_int, display_title, is_live_url, live_mask, ranking_corpus
 from engageiq.embedding import build_index
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
+from engageiq.secrets import openai_configured
 from engageiq.sketches import BloomFilter, CountMinSketch, HyperLogLog
+from engageiq.streaming import OpportunityStream, try_kafka_publish
+from engageiq.suggestions import generate_suggestion
 from engageiq.ui import (
     Action,
     activity_counts,
@@ -34,19 +37,19 @@ from engageiq.ui import (
 PERSONAS: dict[str, str] = {
     "Sofia (ML Student / Portfolio Builder)": (
         "Machine learning, NLP, data pipelines, beginner-friendly open source, good first issues, "
-        "Python, pandas, GitHub issues, Reddit ML discussion."
+        "Python, pandas, GitHub issues, Hacker News ML threads."
     ),
     "David (DevOps / Niche Community)": (
         "Kubernetes, Terraform, CI/CD, observability, cloud-native infra, high-activity repos, "
-        "few contributors, Reddit r/devops and r/kubernetes."
+        "few contributors, Hacker News infra threads."
     ),
     "Lina (Data Journalist / Trend Spotter)": (
         "Trending repos, viral discussions, emerging tools, fast-growing communities, recency, velocity, "
-        "Hacker News, GitHub trending, Reddit multi-domain."
+        "Hacker News, GitHub trending, multi-domain velocity."
     ),
     "Raj (Startup Founder / Marketing-Focused)": (
         "Developer tools, APIs, CLI tools, open-source business, B2B SaaS, discussions where devtools are relevant, "
-        "Reddit r/programming r/SideProject r/startups."
+        "Hacker News and GitHub developer-tools communities."
     ),
 }
 
@@ -98,7 +101,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 7}
+    return store, {"paths": paths, "version": 8}
 
 
 @st.cache_resource
@@ -124,39 +127,18 @@ def _explain_row(row: pd.Series) -> str:
     ]
     if is_live_url(str(row.get("url", ""))):
         parts.append("live API boost")
-    if str(row.get("source", "")) == "github" and int(row.get("good_first_issue") or 0) == 1:
+    if str(row.get("source", "")) == "github" and _safe_int(row.get("good_first_issue")) == 1:
         parts.append("good-first-issue boost")
     return " · ".join(parts)
 
 
-def _suggest_action(row: pd.Series) -> str:
-    src = str(row.get("source", "")).lower()
-    headline = display_title(row)
-    community = str(row.get("community") or row.get("domain") or "")
-
-    if src == "github":
-        if int(row.get("good_first_issue") or 0) == 1:
-            return (
-                f"Open the issue \"{headline[:80]}\" in {community}, comment to confirm scope, "
-                "then submit a small focused PR (docs, test, or UI fix)."
-            )
-        return (
-            f"Visit {community}, read the README and recent issues, pick one small improvement "
-            "(documentation, test coverage, or bug fix), and open a PR with a clear description."
-        )
-    if src == "reddit":
-        com = int(float(row.get("comments") or 0))
-        return (
-            f"Read \"{headline[:80]}\" and the top {min(com, 10)} comments, then reply with "
-            "a concrete tip, one helpful link, and a question to keep the thread going."
-        )
-    if src == "hackernews":
-        pts = int(float(row.get("upvotes") or 0))
-        return (
-            f"Read \"{headline[:80]}\" ({pts:,} pts), open the HN discussion, and post a "
-            "5–8 sentence comment with one practical takeaway and a follow-up question."
-        )
-    return f"Review \"{headline[:80]}\" and decide whether to engage based on your profile fit."
+def _suggest_action(row: pd.Series, interest: str) -> str:
+    if "suggestion_cache" not in st.session_state:
+        st.session_state.suggestion_cache = {}
+    suggestion = generate_suggestion(row, interest, cache=st.session_state.suggestion_cache)
+    if openai_configured():
+        return f"[AI] {suggestion}"
+    return suggestion
 
 
 def _apply_pending_feedback(user: UserState) -> None:
@@ -251,6 +233,9 @@ def main() -> None:
             st.session_state.sketches["hll_authors"].add(str(r["author"]))
         st.session_state.sketch_rows = len(df)
 
+    if "opportunity_stream" not in st.session_state:
+        st.session_state.opportunity_stream = OpportunityStream(bloom=st.session_state.sketches["bloom"])
+
     counts = activity_counts()
 
     with st.sidebar:
@@ -303,27 +288,48 @@ def main() -> None:
         render_rl_policy(user.rl_agent)
 
         st.markdown("---")
-        st.markdown("**Pipeline controls**")
-        batch_size = st.slider("Ingest batch size", 50, 2000, 500, 50)
-        if st.button("Ingest streaming batch", use_container_width=True):
+        st.markdown("**Streaming pipeline**")
+        stream: OpportunityStream = st.session_state.opportunity_stream
+        use_kafka = st.checkbox("Try Kafka publish (localhost:9092)", value=False)
+        batch_size = st.slider("Stream batch size", 50, 2000, 500, 50)
+        c_prod, c_cons = st.columns(2)
+        if c_prod.button("1 · Produce batch", use_container_width=True):
             snapshot = pd.read_csv(paths.snapshot_csv)
             max_id = store.max_id()
             batch = snapshot[snapshot["id"] > max_id].head(int(batch_size)).copy()
             if batch.empty:
-                st.info("Snapshot fully ingested.")
-            else:
-                inserted = store.ingest_batch(batch)
+                batch = snapshot.sample(n=min(int(batch_size), len(snapshot)), random_state=42)
+            n = stream.produce_rows(batch)
+            if use_kafka:
+                sent = try_kafka_publish(batch.to_dict(orient="records"))
+                stream.metrics.kafka_sent += sent
+                if sent:
+                    st.caption(f"Kafka: published {sent} records to engageiq.opportunities")
+            st.success(f"Queued {n} records ({stream.pending()} pending)")
+        if c_cons.button("2 · Consume (dedup → store)", use_container_width=True):
+            def _ingest(batch: pd.DataFrame) -> int:
+                return store.ingest_batch(batch)
+
+            def _sketch_hook(batch: pd.DataFrame) -> None:
                 for _, r in batch.iterrows():
-                    key = str(int(r["id"]))
-                    if key in st.session_state.sketches["bloom"]:
-                        continue
-                    st.session_state.sketches["bloom"].add(key)
                     st.session_state.sketches["cms_domain"].add(str(r["domain"]))
                     st.session_state.sketches["cms_source"].add(str(r["source"]))
                     st.session_state.sketches["hll_authors"].add(str(r["author"]))
-                st.cache_resource.clear()
-                st.success(f"Ingested {inserted} records")
-                st.rerun()
+
+            inserted, deduped = stream.consume(
+                max_items=int(batch_size),
+                ingest_fn=_ingest,
+                sketch_hooks=[_sketch_hook],
+            )
+            st.cache_resource.clear()
+            st.success(f"Ingested {inserted} · dedup skipped {deduped}")
+            st.rerun()
+
+        sm = stream.metrics.to_dict()
+        st.caption(
+            f"Stream: produced {sm['produced']:,} · ingested {sm['ingested']:,} · "
+            f"deduped {sm['deduped']:,} · queue {stream.pending():,}"
+        )
 
         st.markdown("**Sketch metrics**")
         st.caption(
@@ -335,7 +341,7 @@ def main() -> None:
         title="EngageIQ — Engagement Opportunity Scorer",
         subtitle=(
             f"{len(df):,} opportunities in store · {live_n:,} from live GitHub & Hacker News APIs · "
-            "Streaming sketches · Embeddings + ANN · Multi-stage ranking · Reinforcement learning"
+            "Kafka-ready streaming · Bloom dedup · Embeddings + ANN · RL bandit"
         ),
         stats={
             "Dataset": f"{len(df):,}",
@@ -386,7 +392,7 @@ def main() -> None:
                 rank=i + 1,
                 row=row,
                 explain=_explain_row(row),
-                suggest=_suggest_action(row),
+                suggest=_suggest_action(row, user.interest_text),
                 key_prefix="disc",
             )
 
@@ -430,6 +436,20 @@ def main() -> None:
                 .properties(height=240)
             )
             st.altair_chart(cum_chart, use_container_width=True)
+
+        from engageiq.persona_eval import learning_benchmark
+
+        st.markdown("**60-round benchmark (RL vs random domain exploration)**")
+        if st.button("Run RL benchmark", use_container_width=True, key="rl_bench_tab"):
+            lb = learning_benchmark(df, user.interest_text, rounds=60)
+            st.session_state._last_rl_bench = lb
+        if st.session_state.get("_last_rl_bench"):
+            lb = st.session_state._last_rl_bench
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Reward w/ RL (last 10)", f"{lb['avg_reward_last10_with_rl']:.2f}")
+            r2.metric("Reward w/o RL (last 10)", f"{lb['avg_reward_last10_without_rl']:.2f}")
+            r3.metric("Session gain", f"{lb.get('session_reward_gain', lb['reward_improvement_last10']):+.2f}")
+            r4.metric("NDCG improvement", f"{lb['improvement']:+.3f}")
 
     with tab_analytics:
         try:
