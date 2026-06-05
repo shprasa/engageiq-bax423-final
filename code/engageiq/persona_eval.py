@@ -7,7 +7,7 @@ import pandas as pd
 
 from .bandit import BetaBandit
 from .embedding import build_index
-from .ranking import RankConfig, ndcg_at_k, rerank
+from .ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
 from .data_utils import is_live_url
 from .sketches import BloomFilter
 
@@ -70,7 +70,11 @@ def _rank_for_persona(df: pd.DataFrame, interest: str, bandit: BetaBandit | None
     index = build_index(df)
     idxs, dists = index.query(interest, top_k=RankConfig().candidate_k)
     candidates = df.iloc[idxs].copy().reset_index(drop=True)
+    candidates = augment_candidates(candidates, df, interest)
     rel = np.clip(1.0 - np.asarray(dists, dtype=float), 0.0, 1.0)
+    if len(candidates) > len(rel):
+        rel = np.pad(rel, (0, len(candidates) - len(rel)), constant_values=0.35)
+    rel = rel[: len(candidates)]
     rng = np.random.default_rng(42)
     return rerank(candidates, rel, bandit, rng, RankConfig(), interest_text=interest)
 
