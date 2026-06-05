@@ -57,6 +57,31 @@ html, body, [class*="css"] {{
     max-width: 1400px;
 }}
 
+.discover-filter-panel {{
+    background: #F8FAFC;
+    border: 1px solid {BRAND["border"]};
+    border-radius: 12px;
+    padding: 1rem 1.1rem 0.25rem 1.1rem;
+    margin: 0.75rem 0 1rem 0;
+}}
+
+.discover-filter-panel h4 {{
+    margin: 0 0 0.25rem 0 !important;
+    font-size: 1.05rem !important;
+    color: #0F172A !important;
+}}
+
+.discover-help-box {{
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: #1E3A5F;
+}}
+
 .hero-banner {{
     background: linear-gradient(135deg, {BRAND["primary"]} 0%, {BRAND["primary_dark"]} 55%, #1E1B4B 100%);
     border-radius: 16px;
@@ -687,10 +712,10 @@ def render_opportunity_card(
             )
 
         score_facts = [
-            ("Relevance", f"{float(row.get('score_relevance', 0)):.2f}"),
-            ("Health", f"{float(row.get('score_health', 0)):.2f}"),
-            ("Visibility", f"{float(row.get('score_visibility', 0)):.2f}"),
-            ("Effort", f"{float(row.get('score_effort', 0)):.2f}"),
+            ("Match", f"{float(row.get('score_relevance', 0)):.0%}"),
+            ("Activity", f"{float(row.get('score_health', 0)):.0%}"),
+            ("Visibility", f"{float(row.get('score_visibility', 0)):.0%}"),
+            ("Effort", f"{float(row.get('score_effort', 0)):.0%}"),
         ]
         _render_fact_strip(score_facts, columns=4, max_len=8)
 
@@ -699,7 +724,7 @@ def render_opportunity_card(
 
         st.markdown(
             f'<p style="font-size:11px;margin:0.35rem 0;line-height:1.4;">'
-            f"<strong>Why ranked here:</strong> {html.escape(explain)}</p>",
+            f"<strong>Why this is ranked here:</strong> {html.escape(explain)}</p>",
             unsafe_allow_html=True,
         )
         st.markdown(

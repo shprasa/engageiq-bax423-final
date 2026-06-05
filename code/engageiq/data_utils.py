@@ -12,6 +12,10 @@ def is_live_url(url: str) -> bool:
     return "example.local" not in u and u.startswith("http")
 
 
+def is_offline_url(url: str) -> bool:
+    return not is_live_url(url)
+
+
 def live_mask(df: pd.DataFrame) -> pd.Series:
     return df["url"].astype(str).apply(is_live_url)
 
@@ -336,3 +340,96 @@ def escape_markdown(text: str) -> str:
     for ch in ("\\", "*", "_", "`", "#", "[", "]"):
         s = s.replace(ch, f"\\{ch}")
     return s
+
+
+SORT_OPTIONS: dict[str, tuple[str, bool]] = {
+    "Best match to your interests": ("score_final", False),
+    "Quickest to contribute": ("_engagement_rank", True),
+    "Most visible / popular": ("score_visibility", False),
+    "Most active community": ("score_health", False),
+    "Most recent": ("created_at", False),
+}
+
+SOURCE_FILTER_OPTIONS: dict[str, str | None] = {
+    "All sources": None,
+    "GitHub only": "github",
+    "Hacker News only": "hackernews",
+}
+
+ORIGIN_FILTER_OPTIONS: dict[str, str | None] = {
+    "All data": None,
+    "Live from web": "live",
+    "Offline practice data": "offline",
+}
+
+
+def _engagement_rank_series(df: pd.DataFrame) -> pd.Series:
+    """Lower rank = quicker to engage (GFI first, then low effort score)."""
+    gfi = df["good_first_issue"].fillna(0).astype(float)
+    effort = df["score_effort"].fillna(0.5).astype(float)
+    return gfi * -1000 + effort
+
+
+def filter_ranked_results(
+    df: pd.DataFrame,
+    *,
+    source: str = "All",
+    origin: str = "All",
+    domains: list[str] | None = None,
+    good_first_issue_only: bool = False,
+    max_effort: str = "Any",
+) -> pd.DataFrame:
+    out = df.copy()
+    src_val = SOURCE_FILTER_OPTIONS.get(source, source)
+    if src_val:
+        out = out[out["source"].astype(str).str.lower() == src_val.lower()]
+    if origin == "Live from web" or origin == "Live API":
+        out = out[live_mask(out)]
+    elif origin == "Offline practice data" or origin == "Offline backup":
+        out = out[~live_mask(out)]
+    if domains:
+        dom_set = {d.strip() for d in domains if d.strip()}
+        if dom_set:
+            out = out[out["domain"].astype(str).isin(dom_set)]
+    if good_first_issue_only:
+        out = out[out["good_first_issue"].fillna(0).astype(int) == 1]
+    if max_effort == "Under 1 hour":
+        gfi = out["good_first_issue"].fillna(0).astype(int) == 1
+        low_effort = out["score_effort"].fillna(1.0).astype(float) < 0.35
+        out = out[gfi | low_effort]
+    elif max_effort == "Under 2 hours":
+        gfi = out["good_first_issue"].fillna(0).astype(int) == 1
+        med_effort = out["score_effort"].fillna(1.0).astype(float) < 0.65
+        out = out[gfi | med_effort]
+    return out.reset_index(drop=True)
+
+
+def source_mix_summary(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "No results"
+    gh = int((df["source"].astype(str).str.lower() == "github").sum())
+    hn = int((df["source"].astype(str).str.lower() == "hackernews").sum())
+    live_n = int(live_mask(df).sum())
+    offline_n = len(df) - live_n
+    return f"{len(df)} items ({gh} GitHub, {hn} Hacker News, {live_n} live, {offline_n} offline)"
+
+
+def sort_ranked_results(df: pd.DataFrame, sort_by: str = "Best match to your interests") -> pd.DataFrame:
+    if df.empty:
+        return df
+    spec = SORT_OPTIONS.get(sort_by, SORT_OPTIONS["Best match to your interests"])
+    col, ascending = spec
+    out = df.copy()
+    if col == "_engagement_rank":
+        out["_engagement_rank"] = _engagement_rank_series(out)
+    if col == "created_at":
+        out["_sort_ts"] = pd.to_datetime(out["created_at"], errors="coerce")
+        out = out.sort_values("_sort_ts", ascending=ascending, na_position="last").drop(
+            columns=["_sort_ts"], errors="ignore"
+        )
+    else:
+        if col not in out.columns:
+            col = "score_final"
+            ascending = False
+        out = out.sort_values(col, ascending=ascending, na_position="last")
+    return out.drop(columns=["_engagement_rank"], errors="ignore").reset_index(drop=True)

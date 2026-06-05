@@ -13,7 +13,19 @@ from engageiq.analytics import compute_trends, compute_trends_from_df, compute_w
 from engageiq.brief_export import BriefConfig, export_brief_csv, export_brief_pdf
 from engageiq.config import get_paths
 from engageiq.data import OpportunityStore
-from engageiq.data_utils import _safe_int, display_title, is_live_url, live_mask, ranking_corpus
+from engageiq.data_utils import (
+    _safe_int,
+    display_title,
+    filter_ranked_results,
+    is_live_url,
+    live_mask,
+    ORIGIN_FILTER_OPTIONS,
+    ranking_corpus,
+    sort_ranked_results,
+    source_mix_summary,
+    SORT_OPTIONS,
+    SOURCE_FILTER_OPTIONS,
+)
 from engageiq.domains import DOMAINS
 from engageiq.embedding import build_index
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
@@ -100,7 +112,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 10}
+    return store, {"paths": paths, "version": 12}
 
 
 @st.cache_resource
@@ -119,15 +131,15 @@ def _init_user_state(domains: list[str]) -> UserState:
 
 def _explain_row(row: pd.Series) -> str:
     parts = [
-        f"Relevance {row['score_relevance']:.2f}",
-        f"Health {row['score_health']:.2f}",
-        f"Visibility {row['score_visibility']:.2f}",
-        f"Effort {row['score_effort']:.2f}",
+        f"Match {row['score_relevance']:.0%} to your interests",
+        f"Community activity {row['score_health']:.0%}",
+        f"Visibility {row['score_visibility']:.0%}",
+        f"Effort level {row['score_effort']:.0%}",
     ]
     if is_live_url(str(row.get("url", ""))):
-        parts.append("live API boost")
+        parts.append("live web data")
     if str(row.get("source", "")) == "github" and _safe_int(row.get("good_first_issue")) == 1:
-        parts.append("good-first-issue boost")
+        parts.append("beginner-friendly issue")
     return " · ".join(parts)
 
 
@@ -172,6 +184,7 @@ def _rank_opportunities(
     version: int,
     live_only: bool,
     english_only: bool = True,
+    result_limit: int = 80,
 ) -> pd.DataFrame:
     corpus = ranking_corpus(df, live_only=live_only, english_only=english_only)
     corpus_key = f"{len(corpus)}_{live_only}_{english_only}_{hash(tuple(corpus['id'].head(5).tolist()))}"
@@ -187,12 +200,13 @@ def _rank_opportunities(
     if len(candidates) > len(relevance):
         relevance = np.pad(relevance, (0, len(candidates) - len(relevance)), constant_values=0.35)
     relevance = relevance[: len(candidates)]
+    cfg = RankConfig(final_k=result_limit)
     return rerank(
         candidates=candidates,
         relevance01=relevance,
         bandit=user.rl_agent,
         rng=user.rng,
-        cfg=RankConfig(),
+        cfg=cfg,
         interest_text=q,
     )
 
@@ -259,9 +273,9 @@ def main() -> None:
         )
 
         live_only = st.toggle(
-            "Live API opportunities only",
+            "Rank from live API pool only",
             value=True,
-            help="Rank real GitHub and Hacker News URLs. Turn off to include offline backup rows.",
+            help="When on, ranking uses live GitHub + Hacker News URLs. Turn off to include offline backup rows in the ranked pool.",
         )
         english_only = st.toggle("English only", value=True)
 
@@ -331,26 +345,129 @@ def main() -> None:
     ]
     ndcg_val = ndcg_at_k(labels, 10)
     live_in_results = int(live_mask(ranked).sum())
+    pool_gh = int((ranked["source"].astype(str).str.lower() == "github").sum())
+    pool_hn = int((ranked["source"].astype(str).str.lower() == "hackernews").sum())
 
     with tab_discover:
-        c1, c2, c3 = st.columns([2, 1, 1])
-        c1.markdown(f"**Top opportunities** for `{persona.split('(')[0].strip()}`")
-        c2.metric("NDCG@10", f"{ndcg_val:.3f}")
-        c3.metric("Live in top-20", live_in_results)
+        persona_short = persona.split("(")[0].strip()
+        match_pct = min(100, max(0, int(round(ndcg_val * 100))))
+
+        st.markdown(f"### Opportunities for **{persona_short}**")
+        st.markdown(
+            '<div class="discover-help-box">'
+            "<strong>How this works:</strong> We search GitHub and Hacker News for items that match "
+            "what you typed in the sidebar. Each card is a real place you could comment, contribute, "
+            "or join a discussion. Use the <strong>Sort &amp; filter</strong> section below to change "
+            "what you see — for example, show only Hacker News or the quickest tasks first."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(
+            "Interest match",
+            f"{match_pct}%",
+            help="How well the top results fit your sidebar interests. 100% = strong fit.",
+        )
+        m2.metric(
+            "GitHub in list",
+            pool_gh,
+            help="Number of GitHub repos/issues in the current ranked list (before your filters).",
+        )
+        m3.metric(
+            "Hacker News in list",
+            pool_hn,
+            help="Number of Hacker News threads in the current ranked list (before your filters).",
+        )
+        m4.metric(
+            "Live from web",
+            live_in_results,
+            help="Items with real URLs scraped from the internet (not offline practice/backup rows).",
+        )
 
         if live_only and live_n == 0:
-            st.warning("No live API rows loaded. Check code/data/live_opportunities.csv on the server.")
-        elif live_only:
-            st.caption("Ranked with embedding retrieval, multi-stage scoring, and RL domain boosts from your feedback.")
+            st.warning("No live web data loaded. Check that code/data/live_opportunities.csv exists on the server.")
 
-        for i, row in ranked.iterrows():
-            render_opportunity_card(
-                rank=i + 1,
-                row=row,
-                explain=_explain_row(row),
-                suggest=_suggest_action(row, user.interest_text),
-                key_prefix="disc",
+        st.markdown(
+            '<div class="discover-filter-panel"><h4>Sort & filter</h4></div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Change order or narrow results. Example: pick **Hacker News only** or **Quickest to contribute**.")
+
+        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+        sort_by = r1c1.selectbox(
+            "Sort by",
+            options=list(SORT_OPTIONS.keys()),
+            index=0,
+        )
+        source_filter = r1c2.selectbox(
+            "Platform",
+            options=list(SOURCE_FILTER_OPTIONS.keys()),
+            help="Show everything, or only GitHub, or only Hacker News.",
+        )
+        origin_filter = r1c3.selectbox(
+            "Live or offline",
+            options=list(ORIGIN_FILTER_OPTIONS.keys()),
+            help="Live = real scraped links. Offline = backup practice rows for grading without internet.",
+        )
+        max_effort = r1c4.selectbox(
+            "Time to start",
+            options=["Any time", "Under 1 hour", "Under 2 hours"],
+            help="Filter by how long it might take to make your first contribution.",
+        )
+        effort_map = {"Any time": "Any", "Under 1 hour": "Under 1 hour", "Under 2 hours": "Under 2 hours"}
+
+        r2c1, r2c2, r2c3 = st.columns([1, 2.2, 1])
+        show_limit = r2c1.selectbox("Show", options=[10, 20, 40, 80], index=1, format_func=lambda n: f"{n} results")
+        domain_filter = r2c2.multiselect(
+            "Topic area (optional)",
+            options=sorted(ranked["domain"].dropna().astype(str).unique().tolist()),
+            default=[],
+            placeholder="All topic areas — e.g. Machine Learning, DevOps",
+        )
+        gfi_only = r2c3.checkbox("Beginner issues only", value=False, help="GitHub “good first issue” labels only.")
+
+        filtered = filter_ranked_results(
+            ranked,
+            source=source_filter,
+            origin=origin_filter,
+            domains=domain_filter or None,
+            good_first_issue_only=gfi_only,
+            max_effort=effort_map[max_effort],
+        )
+        displayed = sort_ranked_results(filtered, sort_by=sort_by).head(int(show_limit))
+
+        st.markdown(f"**Showing:** {source_mix_summary(displayed)}")
+
+        with st.expander("What do the numbers above mean? (for course graders)"):
+            st.markdown(
+                f"""
+- **Interest match ({match_pct}%)** — Ranking quality metric (NDCG@10 = {ndcg_val:.3f}). Measures how well top results match your interest keywords.
+- **GitHub / Hacker News in list** — How many of each platform appear in the ranked pool of up to 80 items.
+- **Live from web** — Count of items with real API-scraped URLs (vs. offline `example.local` backup rows).
+- **Sort & filter** — Client-side view controls; does not re-run the ML model, only re-orders/filters the ranked pool.
+                """
             )
+
+        if filtered.empty:
+            hint = "Try **All sources**, **All data**, and **Any time**."
+            if origin_filter == "Offline practice data" and live_only:
+                hint = (
+                    "Offline rows are excluded from ranking right now. In the sidebar, turn off "
+                    "**Rank from live API pool only**, then set **Live or offline → Offline practice data**."
+                )
+            elif source_filter == "Hacker News only" and pool_hn == 0:
+                hint = "Try loading the **Lina** or **David** persona — they surface more Hacker News threads."
+            st.info(f"No results match your filters. {hint}")
+        else:
+            for rank_idx, (_, row) in enumerate(displayed.iterrows(), start=1):
+                render_opportunity_card(
+                    rank=rank_idx,
+                    row=row,
+                    explain=_explain_row(row),
+                    suggest=_suggest_action(row, user.interest_text),
+                    key_prefix="disc",
+                )
 
     with tab_bookmarks:
         st.markdown("#### Saved opportunities")
