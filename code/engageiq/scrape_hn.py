@@ -27,6 +27,7 @@ def _match_domain(title: str, url: str) -> str | None:
 
 
 def scrape_hackernews(max_stories: int = 3500) -> pd.DataFrame:
+    print(f"  HN: fetching story id lists...", flush=True)
     story_ids: list[int] = []
     for endpoint in ("topstories", "newstories", "beststories", "askstories", "showstories"):
         r = http_get(f"{HN_API}/{endpoint}.json", timeout=20)
@@ -41,6 +42,7 @@ def scrape_hackernews(max_stories: int = 3500) -> pd.DataFrame:
             seen.add(sid)
             unique_ids.append(sid)
     ids = unique_ids[:max_stories]
+    print(f"  HN: downloading {len(ids)} stories (one HTTP request each)...", flush=True)
 
     rows: list[dict] = []
     row_id = 2_000_000
@@ -86,7 +88,8 @@ def scrape_hackernews(max_stories: int = 3500) -> pd.DataFrame:
         )
         row_id += 1
 
-        if (i + 1) % 50 == 0:
-            time.sleep(0.5)
+        if (i + 1) % 100 == 0:
+            print(f"  HN: {i + 1}/{len(ids)} stories fetched", flush=True)
+            time.sleep(0.3)
 
     return pd.DataFrame(rows)
