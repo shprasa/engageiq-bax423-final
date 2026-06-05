@@ -2,34 +2,11 @@
 
 This folder contains a runnable prototype for **EngageIQ — Smart Engagement Opportunity Scorer**.
 
-## Quick start
-
-1) Create a virtualenv and install deps:
+## Quick start (graders — single command)
 
 ```bash
+cd code
 py -m pip install -r requirements.txt
-```
-
-2) **GitHub API (required for live scrape):**
-
-```bash
-copy .env.example .env
-```
-
-Edit `.env` and set `GITHUB_TOKEN=...` (create at https://github.com/settings/tokens).
-
-**Never paste tokens in chat or commit `.env` to GitHub.**
-
-3) Build live dataset (optional; replaces synthetic snapshot):
-
-```bash
-cd EngageIQ_Final\code
-py scripts\build_snapshot.py
-```
-
-4) Run the app:
-
-```bash
 py -m streamlit run app.py
 ```
 
