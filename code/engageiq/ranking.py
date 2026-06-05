@@ -69,6 +69,31 @@ def score_recency(df: pd.DataFrame) -> np.ndarray:
     return (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
 
 
+def augment_candidates(
+    candidates: pd.DataFrame,
+    pool: pd.DataFrame,
+    interest_text: str,
+    max_extra: int = 50,
+) -> pd.DataFrame:
+    """Ensure good-first-issue GitHub items enter the candidate set for portfolio-builder personas."""
+    it = interest_text.lower()
+    if not any(k in it for k in ("good first issue", "beginner", "portfolio", "open source")):
+        return candidates
+
+    existing_urls = set(candidates["url"].astype(str))
+    gfi = pool[
+        (pool["source"].astype(str) == "github")
+        & (pool["good_first_issue"].fillna(0).astype(float) == 1)
+        & (~pool["url"].astype(str).isin(existing_urls))
+    ]
+    if "machine learning" in it or "nlp" in it:
+        gfi = gfi[gfi["domain"].astype(str).str.contains("Machine Learning|AI Research", case=False)]
+    extra = gfi.head(max_extra)
+    if extra.empty:
+        return candidates
+    return pd.concat([candidates, extra], ignore_index=True).drop_duplicates(subset=["url"])
+
+
 def rerank(
     candidates: pd.DataFrame,
     relevance01: np.ndarray,
@@ -94,6 +119,7 @@ def rerank(
 
     # persona keyword boost (e.g., Kubernetes → DevOps/K8s domain)
     kw_boost = np.zeros(len(candidates), dtype=np.float64)
+    gfi_boost = np.zeros(len(candidates), dtype=np.float64)
     if interest_text.strip():
         it = interest_text.lower()
         for i, dom in enumerate(candidates["domain"].astype(str)):
@@ -109,6 +135,17 @@ def rerank(
                     kw_boost[i] += 0.35
             if "trend" in it or "viral" in it:
                 kw_boost[i] += 0.15 * float(vis[i])
+            if any(k in it for k in ("good first issue", "beginner", "portfolio")):
+                gfi_val = candidates.iloc[i].get("good_first_issue")
+                try:
+                    gfi_ok = int(float(gfi_val)) == 1 if gfi_val == gfi_val else False
+                except (TypeError, ValueError):
+                    gfi_ok = False
+                if gfi_ok:
+                    gfi_boost[i] += 0.45
+                lang = str(candidates.iloc[i].get("lang") or "").lower()
+                if lang in ("c++", "rust"):
+                    kw_boost[i] -= 0.25
         if kw_boost.max() > 0:
             kw_boost = kw_boost / (kw_boost.max() + 1e-9)
 
@@ -121,6 +158,7 @@ def rerank(
             - cfg.w_effort * effort
             + 0.10 * dom_boost
             + 0.12 * kw_boost
+            + 0.15 * gfi_boost
         )
     else:
         final = (
@@ -130,6 +168,7 @@ def rerank(
             - cfg.w_effort * effort
             + 0.10 * dom_boost
             + 0.12 * kw_boost
+            + 0.15 * gfi_boost
         )
 
     # Prefer real API-sourced URLs over offline synthetic backup rows
