@@ -1,0 +1,69 @@
+{
+  "personas": [
+    {
+      "persona": "Sofia (ML Student / Portfolio Builder)",
+      "ndcg10": 1.0,
+      "top10_github_gfi": 3,
+      "top10_cpp_rust": 0,
+      "top10_ml_hits": 10,
+      "top10_infra_hits": 0,
+      "top10_devtools_hits": 0,
+      "pass_sofia": true,
+      "pass_david": false,
+      "pass_lina": true,
+      "pass_raj": false
+    },
+    {
+      "persona": "David (DevOps / Niche Community)",
+      "ndcg10": 0.0,
+      "top10_github_gfi": 0,
+      "top10_cpp_rust": 0,
+      "top10_ml_hits": 0,
+      "top10_infra_hits": 10,
+      "top10_devtools_hits": 0,
+      "pass_sofia": false,
+      "pass_david": true,
+      "pass_lina": true,
+      "pass_raj": false
+    },
+    {
+      "persona": "Lina (Data Journalist / Trend Spotter)",
+      "ndcg10": 0.0,
+      "top10_github_gfi": 0,
+      "top10_cpp_rust": 2,
+      "top10_ml_hits": 0,
+      "top10_infra_hits": 0,
+      "top10_devtools_hits": 0,
+      "pass_sofia": false,
+      "pass_david": false,
+      "pass_lina": true,
+      "pass_raj": false
+    },
+    {
+      "persona": "Raj (Startup Founder / Marketing-Focused)",
+      "ndcg10": 1.0,
+      "top10_github_gfi": 0,
+      "top10_cpp_rust": 3,
+      "top10_ml_hits": 0,
+      "top10_infra_hits": 0,
+      "top10_devtools_hits": 10,
+      "pass_sofia": false,
+      "pass_david": false,
+      "pass_lina": true,
+      "pass_raj": true
+    }
+  ],
+  "learning_benchmark": {
+    "ndcg@10_first10_avg": 1.0,
+    "ndcg@10_last10_avg": 1.0,
+    "ndcg@10_without_bandit_last10": 1.0,
+    "improvement": 0.0
+  },
+  "dataset_rows": 10000,
+  "domains": 15,
+  "sources": {
+    "github": 3349,
+    "reddit": 3337,
+    "hackernews": 3314
+  }
+}
