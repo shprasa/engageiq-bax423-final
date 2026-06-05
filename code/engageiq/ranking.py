@@ -60,6 +60,15 @@ def score_effort(df: pd.DataFrame) -> np.ndarray:
     return np.clip(eff, 0.0, 1.0)
 
 
+def score_recency(df: pd.DataFrame) -> np.ndarray:
+    ts = pd.to_datetime(df["created_at"], errors="coerce")
+    now = pd.Timestamp.now()
+    age_days = (now - ts).dt.total_seconds() / 86400.0
+    age_days = age_days.fillna(9999).to_numpy()
+    raw = 1.0 / (1.0 + age_days)
+    return (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+
+
 def rerank(
     candidates: pd.DataFrame,
     relevance01: np.ndarray,
@@ -71,6 +80,9 @@ def rerank(
     health = score_health(candidates)
     vis = score_visibility(candidates)
     effort = score_effort(candidates)
+    recency = score_recency(candidates)
+
+    trend_mode = any(k in interest_text.lower() for k in ("trend", "velocity", "viral", "recency"))
 
     # bandit provides a prior boost by domain
     if bandit is None:
@@ -100,20 +112,36 @@ def rerank(
         if kw_boost.max() > 0:
             kw_boost = kw_boost / (kw_boost.max() + 1e-9)
 
-    final = (
-        cfg.w_relevance * relevance01
-        + cfg.w_health * health
-        + cfg.w_visibility * vis
-        - cfg.w_effort * effort
-        + 0.10 * dom_boost
-        + 0.12 * kw_boost
-    )
+    if trend_mode:
+        final = (
+            0.25 * relevance01
+            + 0.15 * health
+            + 0.35 * vis
+            + 0.25 * recency
+            - cfg.w_effort * effort
+            + 0.10 * dom_boost
+            + 0.12 * kw_boost
+        )
+    else:
+        final = (
+            cfg.w_relevance * relevance01
+            + cfg.w_health * health
+            + cfg.w_visibility * vis
+            - cfg.w_effort * effort
+            + 0.10 * dom_boost
+            + 0.12 * kw_boost
+        )
+
+    # Prefer real API-sourced URLs over offline synthetic backup rows
+    live = ~candidates["url"].astype(str).str.contains("example.local", na=False)
+    final = final + np.where(live.to_numpy(), 0.18, 0.0)
 
     out = candidates.copy()
     out["score_relevance"] = relevance01
     out["score_health"] = health
     out["score_visibility"] = vis
     out["score_effort"] = effort
+    out["score_recency"] = recency
     out["score_final"] = final
 
     out = out.sort_values("score_final", ascending=False).head(cfg.final_k).reset_index(drop=True)
