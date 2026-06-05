@@ -7,6 +7,8 @@ from typing import Any, Literal
 import pandas as pd
 import streamlit as st
 
+from engageiq.data_utils import describe_opportunity, escape_html, format_created, is_live_url, opportunity_meta
+
 Action = Literal["engage", "bookmark", "skip", "unbookmark"]
 
 SOURCE_COLORS = {
@@ -171,9 +173,37 @@ html, body, [class*="css"] {{
     background: #D1FAE5;
     color: #065F46;
 }}
-.badge-skip {{
-    background: #FEE2E2;
-    color: #991B1B;
+.badge-live {{
+    background: #DCFCE7;
+    color: #166534;
+}}
+.badge-backup {{
+    background: #F1F5F9;
+    color: #475569;
+}}
+
+.opp-desc {{
+    font-size: 0.88rem;
+    color: #334155;
+    line-height: 1.55;
+    margin: 0.5rem 0;
+    padding: 0.55rem 0.7rem;
+    background: #F8FAFC;
+    border-radius: 8px;
+    border-left: 3px solid {BRAND["accent"]};
+}}
+
+.opp-meta {{
+    font-size: 0.78rem;
+    color: {BRAND["muted"]};
+    margin: 0.35rem 0 0.5rem 0;
+}}
+
+.opp-link {{
+    font-size: 0.82rem;
+    color: {BRAND["primary"]};
+    text-decoration: none;
+    word-break: break-all;
 }}
 
 .score-row {{
@@ -356,6 +386,7 @@ class BookmarkEntry:
     domain: str
     source: str
     score_final: float
+    description: str = ""
     bookmarked_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     def to_dict(self) -> dict[str, Any]:
@@ -366,6 +397,7 @@ class BookmarkEntry:
             "domain": self.domain,
             "source": self.source,
             "score_final": self.score_final,
+            "description": self.description,
             "bookmarked_at": self.bookmarked_at,
         }
 
@@ -383,6 +415,7 @@ def log_activity(entry: ActivityEntry) -> None:
 
 def record_feedback(row: pd.Series, action: Action) -> None:
     opp_id = int(row["id"])
+    desc = describe_opportunity(row)
     entry = ActivityEntry(
         opp_id=opp_id,
         action=action,
@@ -394,27 +427,21 @@ def record_feedback(row: pd.Series, action: Action) -> None:
     )
     log_activity(entry)
 
+    bm = BookmarkEntry(
+        opp_id=opp_id,
+        title=str(row["title"]),
+        url=str(row["url"]),
+        domain=str(row["domain"]),
+        source=str(row["source"]),
+        score_final=float(row.get("score_final", 0)),
+        description=desc,
+    )
     if action == "bookmark":
-        st.session_state.bookmarks[opp_id] = BookmarkEntry(
-            opp_id=opp_id,
-            title=str(row["title"]),
-            url=str(row["url"]),
-            domain=str(row["domain"]),
-            source=str(row["source"]),
-            score_final=float(row.get("score_final", 0)),
-        ).to_dict()
+        st.session_state.bookmarks[opp_id] = bm.to_dict()
     elif action == "unbookmark":
         st.session_state.bookmarks.pop(opp_id, None)
     elif action == "engage":
-        if opp_id not in st.session_state.bookmarks:
-            st.session_state.bookmarks[opp_id] = BookmarkEntry(
-                opp_id=opp_id,
-                title=str(row["title"]),
-                url=str(row["url"]),
-                domain=str(row["domain"]),
-                source=str(row["source"]),
-                score_final=float(row.get("score_final", 0)),
-            ).to_dict()
+        st.session_state.bookmarks[opp_id] = bm.to_dict()
 
 
 def is_bookmarked(opp_id: int) -> bool:
@@ -431,6 +458,12 @@ def activity_counts() -> dict[str, int]:
     }
 
 
+def origin_badge(url: str) -> str:
+    if is_live_url(url):
+        return '<span class="badge badge-live">● Live API</span>'
+    return '<span class="badge badge-backup">Offline backup</span>'
+
+
 def render_opportunity_card(
     rank: int,
     row: pd.Series,
@@ -443,22 +476,34 @@ def render_opportunity_card(
     card_cls = "opp-card bookmarked" if bookmarked else "opp-card"
     bookmark_badge = '<span class="badge badge-bookmark">★ Saved</span>' if bookmarked else ""
 
+    title = escape_html(row["title"])
+    url = str(row["url"])
+    url_safe = escape_html(url)
+    domain = escape_html(row["domain"])
+    description = escape_html(describe_opportunity(row))
+    meta = escape_html(opportunity_meta(row))
+    explain_safe = escape_html(explain)
+    suggest_safe = escape_html(suggest)
+
     st.markdown(
         f"""
 <div class="{card_cls}">
   <div style="display:flex;align-items:flex-start;gap:0.5rem;">
     <span class="opp-rank">{rank}</span>
     <div style="flex:1;">
-      <div style="font-weight:700;font-size:1.02rem;color:#0F172A;margin-bottom:0.35rem;">{row["title"]}</div>
+      <div style="font-weight:700;font-size:1.05rem;color:#0F172A;margin-bottom:0.35rem;">{title}</div>
       <div style="margin-bottom:0.35rem;">
         {source_badge(str(row["source"]))}
-        <span class="badge badge-domain">{row["domain"]}</span>
+        {origin_badge(url)}
+        <span class="badge badge-domain">{domain}</span>
         {bookmark_badge}
       </div>
-      <div style="font-size:0.82rem;color:{BRAND["muted"]};margin-bottom:0.25rem;">{row["url"]}</div>
+      <div class="opp-meta">{meta}</div>
+      <div class="opp-desc">{description}</div>
+      <a class="opp-link" href="{url_safe}" target="_blank" rel="noopener">{url_safe}</a>
       {score_pills(row)}
-      <div style="font-size:0.8rem;color:#475569;">Why ranked here: {explain}</div>
-      <div class="suggest-box">{suggest}</div>
+      <div style="font-size:0.8rem;color:#475569;margin-top:0.45rem;"><strong>Why ranked here:</strong> {explain_safe}</div>
+      <div class="suggest-box"><strong>Suggested action:</strong> {suggest_safe}</div>
     </div>
   </div>
 </div>
@@ -467,19 +512,21 @@ def render_opportunity_card(
     )
 
     if show_actions:
-        fb = st.columns([0.16, 0.16, 0.16, 0.52])
+        fb = st.columns([0.14, 0.14, 0.14, 0.18, 0.40])
         row_dict = row.to_dict()
-        if fb[0].button("✓ Engage", key=f"{key_prefix}_engage_{int(row['id'])}", use_container_width=True):
+        if is_live_url(url) and fb[0].link_button("Open ↗", url, use_container_width=True):
+            pass
+        if fb[1].button("✓ Engage", key=f"{key_prefix}_engage_{int(row['id'])}", use_container_width=True):
             st.session_state._pending_action = ("engage", row_dict)
             st.rerun()
         if bookmarked:
-            if fb[1].button("★ Saved", key=f"{key_prefix}_unbm_{int(row['id'])}", use_container_width=True):
+            if fb[2].button("★ Saved", key=f"{key_prefix}_unbm_{int(row['id'])}", use_container_width=True):
                 st.session_state._pending_action = ("unbookmark", row_dict)
                 st.rerun()
-        elif fb[1].button("☆ Bookmark", key=f"{key_prefix}_bm_{int(row['id'])}", use_container_width=True):
+        elif fb[2].button("☆ Bookmark", key=f"{key_prefix}_bm_{int(row['id'])}", use_container_width=True):
             st.session_state._pending_action = ("bookmark", row_dict)
             st.rerun()
-        if fb[2].button("✕ Skip", key=f"{key_prefix}_skip_{int(row['id'])}", use_container_width=True):
+        if fb[3].button("✕ Skip", key=f"{key_prefix}_skip_{int(row['id'])}", use_container_width=True):
             st.session_state._pending_action = ("skip", row_dict)
             st.rerun()
 
@@ -525,22 +572,27 @@ def render_bookmarks_list() -> None:
 
     bookmarks = sorted(bookmarks, key=lambda b: b.get("bookmarked_at", ""), reverse=True)
     for i, b in enumerate(bookmarks, start=1):
+        title = escape_html(b["title"])
+        url = str(b["url"])
+        desc = escape_html(b.get("description") or "")
         st.markdown(
             f"""
 <div class="opp-card bookmarked">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-    <div>
-      <div style="font-weight:700;color:#0F172A;">{i}. {b["title"]}</div>
-      <div style="margin:0.35rem 0;">{source_badge(b["source"])} <span class="badge badge-domain">{b["domain"]}</span></div>
-      <div style="font-size:0.82rem;color:{BRAND["muted"]};">{b["url"]}</div>
-      <div style="font-size:0.75rem;color:{BRAND["muted"]};margin-top:0.35rem;">Saved {b.get("bookmarked_at", "—")} · Score {float(b.get("score_final", 0)):.2f}</div>
-    </div>
+  <div>
+    <div style="font-weight:700;color:#0F172A;">{i}. {title}</div>
+    <div style="margin:0.35rem 0;">{source_badge(b["source"])} {origin_badge(url)} <span class="badge badge-domain">{escape_html(b["domain"])}</span></div>
+    {f'<div class="opp-desc">{desc}</div>' if desc else ''}
+    <a class="opp-link" href="{escape_html(url)}" target="_blank" rel="noopener">{escape_html(url)}</a>
+    <div style="font-size:0.75rem;color:{BRAND["muted"]};margin-top:0.35rem;">Saved {b.get("bookmarked_at", "—")} · Score {float(b.get("score_final", 0)):.2f}</div>
   </div>
 </div>
             """,
             unsafe_allow_html=True,
         )
-        if st.button("Remove bookmark", key=f"rm_bm_{b['opp_id']}"):
+        bc1, bc2 = st.columns([0.25, 0.75])
+        if is_live_url(url):
+            bc1.link_button("Open ↗", url, key=f"open_bm_{b['opp_id']}", use_container_width=True)
+        if bc1.button("Remove", key=f"rm_bm_{b['opp_id']}", use_container_width=True):
             st.session_state._pending_action = (
                 "unbookmark",
                 {
