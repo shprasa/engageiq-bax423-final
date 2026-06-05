@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from engageiq.analytics import compute_trends
+from engageiq.analytics import compute_trends, compute_trends_from_df
 from engageiq.bandit import BetaBandit
 from engageiq.brief_export import BriefConfig, export_brief_csv, export_brief_pdf
 from engageiq.config import get_paths
@@ -49,9 +49,9 @@ class UserState:
 @st.cache_resource
 def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     paths = get_paths()
-    store = OpportunityStore(paths.duckdb_path)
+    store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=10000)
-    return store, {"paths": paths}
+    return store, {"paths": paths, "version": 3}
 
 
 @st.cache_resource
@@ -244,7 +244,10 @@ def main() -> None:
                     st.rerun()
 
         st.subheader("Batch analytics & trend detection")
-        trends = compute_trends(str(paths.duckdb_path), days=30)
+        try:
+            trends = compute_trends(str(paths.duckdb_path), days=30)
+        except Exception:
+            trends = compute_trends_from_df(df, days=30)
 
         dom_chart = (
             alt.Chart(trends.by_domain)
