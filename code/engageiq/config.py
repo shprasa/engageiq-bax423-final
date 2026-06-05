@@ -13,25 +13,23 @@ class Paths:
     data_dir: Path
     snapshot_csv: Path
     duckdb_path: Path
+    is_cloud: bool
 
 
-def _is_cloud_runtime() -> bool:
-    """Detect Streamlit Cloud / other read-only container mounts."""
+def _is_cloud_runtime(project_root: Path) -> bool:
+    root = str(project_root).replace("\\", "/")
+    if root.startswith("/mount"):
+        return True
     if os.getenv("STREAMLIT_RUNTIME_ENV") == "cloud":
         return True
     if os.getenv("STREAMLIT_CLOUD"):
         return True
-    cwd = str(Path.cwd())
-    if cwd.startswith("/mount"):
-        return True
     return False
 
 
-def _writable_duckdb_path(data_dir: Path) -> Path:
-    """Streamlit Cloud repo is read-only — DuckDB must live in /tmp."""
-    if _is_cloud_runtime():
-        return Path(tempfile.gettempdir()) / "engageiq.duckdb"
-
+def _duckdb_path(data_dir: Path, is_cloud: bool) -> Path:
+    if is_cloud:
+        return Path("/tmp/engageiq.duckdb")
     target = data_dir / "engageiq.duckdb"
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -47,10 +45,12 @@ def get_paths() -> Paths:
     code_dir = Path(__file__).resolve().parent.parent
     project_root = code_dir.parent
     data_dir = project_root / "data"
+    is_cloud = _is_cloud_runtime(project_root)
     return Paths(
         code_dir=code_dir,
         project_root=project_root,
         data_dir=data_dir,
         snapshot_csv=data_dir / "opportunities_snapshot.csv",
-        duckdb_path=_writable_duckdb_path(data_dir),
+        duckdb_path=_duckdb_path(data_dir, is_cloud),
+        is_cloud=is_cloud,
     )
