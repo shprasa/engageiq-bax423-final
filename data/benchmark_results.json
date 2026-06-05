@@ -1,17 +1,44 @@
 {
+  "dataset": {
+    "dataset_rows": 11964,
+    "live_rows": 1964,
+    "synthetic_rows": 10000,
+    "domains": 15,
+    "sources": {
+      "hackernews": 4350,
+      "github": 4277,
+      "reddit": 3337
+    },
+    "live_by_source": {
+      "hackernews": 1036,
+      "github": 928
+    }
+  },
+  "sketch_benchmark": {
+    "duplicate_urls_in_dataset": 18.0,
+    "unique_after_bloom": 11946.0
+  },
   "personas": [
     {
       "persona": "Sofia (ML Student / Portfolio Builder)",
       "ndcg10": 1.0,
-      "top10_github_gfi": 3,
-      "top10_cpp_rust": 0,
+      "top10_github_gfi": 0,
+      "top10_cpp_rust": 2,
       "top10_ml_hits": 10,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 0,
-      "pass_sofia": true,
+      "pass_sofia": false,
       "pass_david": false,
       "pass_lina": true,
-      "pass_raj": false
+      "pass_raj": false,
+      "capability_pass": {
+        "1 Multi-source ingest + streaming": "PASS",
+        "2 Embeddings + ANN retrieval": "PASS",
+        "3 Scoring + multi-stage ranking": "PARTIAL",
+        "4 Adaptive learning (50+ rounds)": "PASS",
+        "5 Batch analytics + trends": "PASS",
+        "6 Dashboard + brief export": "PASS"
+      }
     },
     {
       "persona": "David (DevOps / Niche Community)",
@@ -19,38 +46,62 @@
       "top10_github_gfi": 0,
       "top10_cpp_rust": 0,
       "top10_ml_hits": 0,
-      "top10_infra_hits": 10,
-      "top10_devtools_hits": 0,
+      "top10_infra_hits": 9,
+      "top10_devtools_hits": 1,
       "pass_sofia": false,
       "pass_david": true,
       "pass_lina": true,
-      "pass_raj": false
+      "pass_raj": false,
+      "capability_pass": {
+        "1 Multi-source ingest + streaming": "PASS",
+        "2 Embeddings + ANN retrieval": "PASS",
+        "3 Scoring + multi-stage ranking": "PASS",
+        "4 Adaptive learning (50+ rounds)": "PASS",
+        "5 Batch analytics + trends": "PASS",
+        "6 Dashboard + brief export": "PASS"
+      }
     },
     {
       "persona": "Lina (Data Journalist / Trend Spotter)",
       "ndcg10": 0.0,
       "top10_github_gfi": 0,
-      "top10_cpp_rust": 2,
+      "top10_cpp_rust": 3,
       "top10_ml_hits": 0,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 0,
       "pass_sofia": false,
       "pass_david": false,
       "pass_lina": true,
-      "pass_raj": false
+      "pass_raj": false,
+      "capability_pass": {
+        "1 Multi-source ingest + streaming": "PASS",
+        "2 Embeddings + ANN retrieval": "PASS",
+        "3 Scoring + multi-stage ranking": "PASS",
+        "4 Adaptive learning (50+ rounds)": "PASS",
+        "5 Batch analytics + trends": "PASS",
+        "6 Dashboard + brief export": "PASS"
+      }
     },
     {
       "persona": "Raj (Startup Founder / Marketing-Focused)",
       "ndcg10": 1.0,
       "top10_github_gfi": 0,
-      "top10_cpp_rust": 3,
+      "top10_cpp_rust": 1,
       "top10_ml_hits": 0,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 10,
       "pass_sofia": false,
       "pass_david": false,
       "pass_lina": true,
-      "pass_raj": true
+      "pass_raj": true,
+      "capability_pass": {
+        "1 Multi-source ingest + streaming": "PASS",
+        "2 Embeddings + ANN retrieval": "PASS",
+        "3 Scoring + multi-stage ranking": "PASS",
+        "4 Adaptive learning (50+ rounds)": "PASS",
+        "5 Batch analytics + trends": "PASS",
+        "6 Dashboard + brief export": "PASS"
+      }
     }
   ],
   "learning_benchmark": {
@@ -58,12 +109,5 @@
     "ndcg@10_last10_avg": 1.0,
     "ndcg@10_without_bandit_last10": 1.0,
     "improvement": 0.0
-  },
-  "dataset_rows": 10000,
-  "domains": 15,
-  "sources": {
-    "github": 3349,
-    "reddit": 3337,
-    "hackernews": 3314
   }
 }
