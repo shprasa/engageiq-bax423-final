@@ -14,6 +14,27 @@ class TrendSummary:
     volume_over_time: pd.DataFrame
 
 
+def compute_trends_from_df(df: pd.DataFrame, days: int = 30) -> TrendSummary:
+    since = datetime.now() - timedelta(days=int(days))
+    work = df.copy()
+    work["created_at"] = pd.to_datetime(work["created_at"], errors="coerce")
+    work = work[work["created_at"] >= since]
+
+    by_domain = (
+        work.groupby("domain", as_index=False)
+        .agg(n=("id", "count"), avg_upvotes=("upvotes", "mean"), avg_comments=("comments", "mean"))
+        .sort_values("n", ascending=False)
+    )
+    by_source = (
+        work.groupby("source", as_index=False)
+        .agg(n=("id", "count"), avg_upvotes=("upvotes", "mean"), avg_comments=("comments", "mean"))
+        .sort_values("n", ascending=False)
+    )
+    work["day"] = work["created_at"].dt.floor("D")
+    volume_over_time = work.groupby("day", as_index=False).agg(n=("id", "count")).sort_values("day")
+    return TrendSummary(by_domain=by_domain, by_source=by_source, volume_over_time=volume_over_time)
+
+
 def compute_trends(duckdb_path: str, days: int = 30) -> TrendSummary:
     since = (datetime.now() - timedelta(days=int(days))).strftime("%Y-%m-%dT%H:%M:%S")
     con = duckdb.connect(duckdb_path, read_only=True)
