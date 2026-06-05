@@ -169,7 +169,7 @@ def main() -> None:
         st.subheader("Sketch metrics (from streaming pipeline state)")
         st.write(
             {
-                "ingested_records": int(store.count()),
+                "ingested_records": len(df),
                 "approx_unique_authors_hll": int(st.session_state.sketches["hll_authors"].count()),
             }
         )
