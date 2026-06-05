@@ -23,7 +23,7 @@
       "persona": "Sofia (ML Student / Portfolio Builder)",
       "ndcg10": 1.0,
       "top10_github_gfi": 0,
-      "top10_cpp_rust": 2,
+      "top10_cpp_rust": 0,
       "top10_ml_hits": 10,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 0,
