@@ -9,11 +9,13 @@ import pandas as pd
 import streamlit as st
 
 from engageiq.data_utils import (
+    _safe_int,
     decision_facts,
     display_subtitle,
     display_summary,
     display_title,
     estimated_engagement_time,
+    escape_markdown,
     is_live_url,
     opportunity_type_label,
 )
@@ -500,7 +502,7 @@ def render_opportunity_card(
     facts = decision_facts(row)
 
     with st.container(border=True):
-        header = f"### #{rank} · {headline}"
+        header = f"### #{rank} · {escape_markdown(headline)}"
         if bookmarked:
             header += " · :orange[★ Saved]"
         st.markdown(header)
@@ -510,11 +512,12 @@ def render_opportunity_card(
         if subtitle:
             st.caption(subtitle)
 
-        st.markdown(summary)
+        st.write(summary)
 
         fact_cols = st.columns(min(4, max(1, len(facts))))
         for i, (label, value) in enumerate(facts[:4]):
-            fact_cols[i].metric(label, value)
+            display_val = "—" if str(value).lower() in ("nan", "none", "") else value
+            fact_cols[i].metric(label, display_val)
 
         if len(facts) > 4:
             with st.expander("More details"):
@@ -537,7 +540,7 @@ def render_opportunity_card(
         m3.metric("Visibility", f"{float(row.get('score_visibility', 0)):.2f}")
         m4.metric("Effort", f"{float(row.get('score_effort', 0)):.2f}")
 
-        if str(row.get("source", "")) == "github" and int(row.get("good_first_issue") or 0) == 1:
+        if str(row.get("source", "")) == "github" and _safe_int(row.get("good_first_issue")) == 1:
             st.success("Good first issue — beginner-friendly, typically < 1 hour to start")
 
         st.markdown(f"**Why ranked here:** {explain}")
