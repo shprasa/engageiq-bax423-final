@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from .bandit import BetaBandit
-from .reinforcement_learning import EngagementRLAgent
-
-# Backward-compatible alias — bandit is the RL policy object used in ranking
-RLAgent = EngagementRLAgent | BetaBandit
 
 
 @dataclass
@@ -101,7 +98,7 @@ def augment_candidates(
 def rerank(
     candidates: pd.DataFrame,
     relevance01: np.ndarray,
-    bandit: BetaBandit | EngagementRLAgent | None,
+    bandit: BetaBandit | Any | None,
     rng: np.random.Generator,
     cfg: RankConfig,
     interest_text: str = "",
@@ -146,7 +143,7 @@ def rerank(
                 except (TypeError, ValueError):
                     gfi_ok = False
                 if gfi_ok:
-                    gfi_boost[i] += 0.45
+                    gfi_boost[i] += 0.85
                 lang = str(candidates.iloc[i].get("lang") or "").lower()
                 if lang in ("c++", "rust"):
                     kw_boost[i] -= 0.25
@@ -162,7 +159,7 @@ def rerank(
             - cfg.w_effort * effort
             + 0.10 * dom_boost
             + 0.12 * kw_boost
-            + 0.15 * gfi_boost
+            + 0.35 * gfi_boost
         )
     else:
         final = (
@@ -172,7 +169,7 @@ def rerank(
             - cfg.w_effort * effort
             + 0.10 * dom_boost
             + 0.12 * kw_boost
-            + 0.15 * gfi_boost
+            + 0.35 * gfi_boost
         )
 
     # Prefer real API-sourced URLs over offline synthetic backup rows
