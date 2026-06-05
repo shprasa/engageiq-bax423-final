@@ -152,8 +152,6 @@ def opportunity_type_label(row: pd.Series) -> str:
         if "news.ycombinator.com/item" in url:
             return "Hacker News Discussion"
         return "Hacker News Story"
-    if src == "reddit":
-        return "Reddit Thread"
     return "Engagement Opportunity"
 
 
@@ -176,9 +174,6 @@ def display_title(row: pd.Series) -> str:
 
     if src == "hackernews":
         return title or "Hacker News story"
-
-    if src == "reddit":
-        return title or "Reddit discussion"
 
     if title.lower().startswith(f"{row.get('domain', '')} - opportunity".lower()):
         return text or title
@@ -216,14 +211,6 @@ def display_subtitle(row: pd.Series) -> str:
             parts.append(f"by {author}")
         return " · ".join(parts)
 
-    if src == "reddit":
-        parts = []
-        if community:
-            parts.append(f"r/{community}" if not community.startswith("r/") else community)
-        if author:
-            parts.append(f"u/{author}")
-        return " · ".join(parts) if parts else "Community discussion on Reddit"
-
     return str(row.get("domain") or "")
 
 
@@ -257,11 +244,6 @@ def display_summary(row: pd.Series) -> str:
             return f"Active Hacker News thread with {int(float(row.get('comments') or 0)):,} comments — join the technical discussion."
         return f"Trending link shared on Hacker News ({int(float(row.get('upvotes') or 0)):,} points). Read the article, then add a substantive comment on the discussion thread."
 
-    if src == "reddit":
-        if text:
-            return text
-        return f"Discussion thread in {row.get('domain', 'tech community')} — read comments and add value with a specific tip or question."
-
     return text or f"Opportunity in {row.get('domain', 'this domain')}."
 
 
@@ -292,9 +274,6 @@ def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
         author = str(row.get("author") or "").strip()
         if author:
             facts.append(("Author", author))
-    elif src == "reddit":
-        facts.append(("Upvotes", f"{int(float(row.get('upvotes') or 0)):,}"))
-        facts.append(("Comments", f"{int(float(row.get('comments') or 0)):,}"))
 
     author = str(row.get("author") or "").strip()
     if author and not any(k == "Author" for k, _ in facts):
