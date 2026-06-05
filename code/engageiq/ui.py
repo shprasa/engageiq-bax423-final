@@ -25,7 +25,6 @@ Action = Literal["engage", "bookmark", "skip", "unbookmark"]
 SOURCE_COLORS = {
     "github": ("#238636", "GitHub"),
     "hackernews": ("#FF6600", "Hacker News"),
-    "reddit": ("#FF4500", "Reddit"),
 }
 
 BRAND = {
@@ -477,7 +476,7 @@ def origin_badge(url: str) -> str:
 
 
 def _source_label(source: str) -> str:
-    return {"github": "GitHub", "hackernews": "Hacker News", "reddit": "Reddit"}.get(
+    return {"github": "GitHub", "hackernews": "Hacker News"}.get(
         str(source).lower(), str(source)
     )
 
