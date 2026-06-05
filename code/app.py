@@ -184,7 +184,7 @@ def _rank_opportunities(
     version: int,
     live_only: bool,
     english_only: bool = True,
-    result_limit: int = 80,
+    result_limit: int = 100,
 ) -> pd.DataFrame:
     corpus = ranking_corpus(df, live_only=live_only, english_only=english_only)
     corpus_key = f"{len(corpus)}_{live_only}_{english_only}_{hash(tuple(corpus['id'].head(5).tolist()))}"
@@ -418,7 +418,7 @@ def main() -> None:
         effort_map = {"Any time": "Any", "Under 1 hour": "Under 1 hour", "Under 2 hours": "Under 2 hours"}
 
         r2c1, r2c2, r2c3 = st.columns([1, 2.2, 1])
-        show_limit = r2c1.selectbox("Show", options=[10, 20, 40, 80], index=1, format_func=lambda n: f"{n} results")
+        show_limit = r2c1.selectbox("Show", options=[10, 20, 40, 80, 100], index=4, format_func=lambda n: f"{n} results")
         domain_filter = r2c2.multiselect(
             "Topic area (optional)",
             options=sorted(ranked["domain"].dropna().astype(str).unique().tolist()),
@@ -443,7 +443,7 @@ def main() -> None:
             st.markdown(
                 f"""
 - **Interest match ({match_pct}%)** — Ranking quality metric (NDCG@10 = {ndcg_val:.3f}). Measures how well top results match your interest keywords.
-- **GitHub / Hacker News in list** — How many of each platform appear in the ranked pool of up to 80 items.
+- **GitHub / Hacker News in list** — How many of each platform appear in the ranked pool of up to 100 items.
 - **Live from web** — Count of items with real API-scraped URLs (vs. offline `example.local` backup rows).
 - **Sort & filter** — Client-side view controls; does not re-run the ML model, only re-orders/filters the ranked pool.
                 """
