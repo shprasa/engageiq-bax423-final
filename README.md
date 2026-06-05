@@ -3,7 +3,7 @@
 **Student:** Shivneel Prasad  
 **Course:** BAX-423 Big Data · UC Davis GSM · Spring 2026
 
-Smart engagement opportunity scorer across GitHub, Hacker News, and Reddit.
+Smart engagement opportunity scorer across GitHub and Hacker News.
 
 ## Live demo
 
