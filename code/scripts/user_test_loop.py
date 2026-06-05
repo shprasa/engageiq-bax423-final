@@ -188,15 +188,33 @@ def check_card_decision_info(report: Report, df: pd.DataFrame) -> None:
 
 def check_live_only_ranking(report: Report, df: pd.DataFrame) -> None:
     name = "live_only_ranking"
-    corpus = ranking_corpus(df, live_only=True)
+    corpus = ranking_corpus(df, live_only=True, english_only=True)
     if len(corpus) < 100:
-        _fail(report, name, f"Live corpus too small: {len(corpus)}")
+        _fail(report, name, f"English live corpus too small: {len(corpus)}")
         return
     if not live_mask(corpus).all():
         fake = int((~live_mask(corpus)).sum())
         _fail(report, name, f"Live-only corpus contains {fake} non-live URLs")
         return
     _pass(report, name)
+
+
+def check_plain_text_summaries(report: Report, df: pd.DataFrame) -> None:
+    name = "plain_text_summaries"
+    from engageiq.data_utils import strip_markdown
+
+    live = df[live_mask(df)].head(200)
+    bad = 0
+    for _, row in live.iterrows():
+        summary = display_summary(row)
+        if "###" in summary or summary.startswith("#"):
+            bad += 1
+        if strip_markdown(str(row.get("text") or "")) != strip_markdown(str(row.get("text") or "")):
+            pass
+    if bad > 0:
+        _fail(report, name, f"{bad} summaries still contain markdown heading markers")
+    else:
+        _pass(report, name)
 
 
 def check_persona_benchmarks(report: Report, df: pd.DataFrame) -> None:
@@ -357,6 +375,7 @@ def run_all_checks() -> Report:
         Check("live_card_titles", "cards", lambda: check_live_card_titles(report, df)),
         Check("card_decision_info", "cards", lambda: check_card_decision_info(report, df)),
         Check("live_only_ranking", "ranking", lambda: check_live_only_ranking(report, df)),
+        Check("plain_text_summaries", "cards", lambda: check_plain_text_summaries(report, df)),
         Check("persona_benchmarks", "benchmarks", lambda: check_persona_benchmarks(report, df)),
         Check("user_session_simulation", "ux", lambda: simulate_user_session(report, df)),
         Check("suggest_action_quality", "ux", lambda: check_suggest_action(report, df)),
