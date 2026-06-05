@@ -47,7 +47,7 @@ def build_brief(out_pdf: Path, bench_path: Path) -> None:
     story.append(_p("<b>1. System architecture & pipeline</b>", h2))
     story.append(
         _p(
-            "Pipeline: GitHub API + Hacker News API → URL dedup on ingest → DuckDB store → "
+            "Pipeline: GitHub API + GitHub Archive (gharchive.org) → URL dedup on ingest → DuckDB store → "
             "TF-IDF/SVD embeddings → cosine ANN retrieval → multi-stage ranker "
             "(relevance, health, visibility, effort, recency) → reinforcement learning "
             "(Thompson-sampling contextual bandit) from engage/skip/bookmark feedback → "

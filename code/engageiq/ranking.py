@@ -29,11 +29,11 @@ def score_health(df: pd.DataFrame) -> np.ndarray:
     com = df["comments"].fillna(0).astype(float).to_numpy()
     stars = df["stars"].fillna(0).astype(float).to_numpy()
     forks = df["forks"].fillna(0).astype(float).to_numpy()
-    is_hn = df["source"].astype(str).str.lower().eq("hackernews").to_numpy()
+    is_gha = df["source"].astype(str).str.lower().eq("gharchive").to_numpy()
 
     s_gh = 0.35 * np.log1p(up) + 0.25 * np.log1p(com) + 0.25 * np.log1p(stars) + 0.15 * np.log1p(forks)
-    s_hn = 0.55 * np.log1p(up) + 0.45 * np.log1p(com)
-    s = np.where(is_hn, s_hn, s_gh)
+    s_gha = 0.55 * np.log1p(com) + 0.45 * np.log1p(up)
+    s = np.where(is_gha, s_gha, s_gh)
     return (s - s.min()) / (s.max() - s.min() + 1e-9)
 
 
@@ -41,11 +41,11 @@ def score_visibility(df: pd.DataFrame) -> np.ndarray:
     up = df["upvotes"].fillna(0).astype(float).to_numpy()
     com = df["comments"].fillna(0).astype(float).to_numpy()
     stars = df["stars"].fillna(0).astype(float).to_numpy()
-    is_hn = df["source"].astype(str).str.lower().eq("hackernews").to_numpy()
+    is_gha = df["source"].astype(str).str.lower().eq("gharchive").to_numpy()
 
     raw_gh = 0.5 * np.log1p(up) + 0.35 * np.log1p(com) + 0.15 * np.log1p(stars)
-    raw_hn = 0.55 * np.log1p(up) + 0.45 * np.log1p(com)
-    raw = np.where(is_hn, raw_hn, raw_gh)
+    raw_gha = 0.65 * np.log1p(com) + 0.35 * np.log1p(up)
+    raw = np.where(is_gha, raw_gha, raw_gh)
     return (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
 
 
@@ -78,11 +78,8 @@ def augment_candidates(
     interest_text: str,
     max_extra: int = 50,
 ) -> pd.DataFrame:
-    """Ensure good-first-issue GitHub items enter the candidate set for portfolio-builder personas."""
+    """Ensure domain-relevant GitHub / GH Archive items enter the candidate set."""
     it = interest_text.lower()
-    if not any(k in it for k in ("good first issue", "beginner", "portfolio", "open source")):
-        return candidates
-
     existing_urls = set(candidates["url"].astype(str))
     extras: list[pd.DataFrame] = []
 
@@ -97,43 +94,43 @@ def augment_candidates(
         if not gfi.empty:
             extras.append(gfi.head(max_extra // 2))
 
-    if any(k in it for k in ("machine learning", "nlp", "hacker news", "ml threads")):
-        hn = pool[
-            (pool["source"].astype(str) == "hackernews")
+    if any(k in it for k in ("machine learning", "nlp", "github archive", "gh archive", "gharchive")):
+        gha = pool[
+            (pool["source"].astype(str) == "gharchive")
             & (pool["domain"].astype(str).str.contains("Machine Learning|AI Research", case=False))
             & (~pool["url"].astype(str).isin(existing_urls))
         ]
-        if not hn.empty:
-            extras.append(hn.head(max_extra // 3))
+        if not gha.empty:
+            extras.append(gha.head(max_extra // 3))
 
-    hn_interest = any(
+    gha_interest = any(
         k in it
-        for k in ("hacker news", "hackernews", " hn ", "hn threads", "infra threads", "ml threads", "discussions")
+        for k in ("github archive", "gh archive", "gharchive", "archive events", "public timeline", "issue event")
     )
-    if hn_interest:
-        hn_pool = pool[
-            (pool["source"].astype(str) == "hackernews")
+    if gha_interest:
+        gha_pool = pool[
+            (pool["source"].astype(str) == "gharchive")
             & (~pool["url"].astype(str).isin(existing_urls))
         ]
         if any(k in it for k in ("kubernetes", "terraform", "devops", "ci/cd", "observability", "infra")):
-            hn_pool = hn_pool[hn_pool["domain"].astype(str).str.contains("DevOps", case=False)]
+            gha_pool = gha_pool[gha_pool["domain"].astype(str).str.contains("DevOps", case=False)]
         elif any(k in it for k in ("developer tools", "api", "cli", "b2b", "saas")):
-            hn_pool = hn_pool[
-                hn_pool["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False)
+            gha_pool = gha_pool[
+                gha_pool["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False)
             ]
         elif any(k in it for k in ("trend", "viral", "velocity", "recency")):
-            hn_pool = hn_pool.sort_values(["upvotes", "comments"], ascending=False)
-        if not hn_pool.empty:
-            extras.append(hn_pool.head(max_extra // 2))
+            gha_pool = gha_pool.sort_values(["comments", "created_at"], ascending=False)
+        if not gha_pool.empty:
+            extras.append(gha_pool.head(max_extra // 2))
 
     if any(k in it for k in ("kubernetes", "terraform", "devops", "ci/cd", "observability", "infra")):
-        hn_infra = pool[
-            (pool["source"].astype(str) == "hackernews")
+        gha_infra = pool[
+            (pool["source"].astype(str) == "gharchive")
             & (pool["domain"].astype(str).str.contains("DevOps", case=False))
             & (~pool["url"].astype(str).isin(existing_urls))
         ]
-        if not hn_infra.empty:
-            extras.append(hn_infra.head(max_extra // 3))
+        if not gha_infra.empty:
+            extras.append(gha_infra.head(max_extra // 3))
         stars = pool["stars"].fillna(0).astype(float)
         gh_niche = pool[
             (pool["source"].astype(str) == "github")
@@ -181,18 +178,18 @@ def rerank(
     # persona keyword boost (e.g., Kubernetes → DevOps/K8s domain)
     kw_boost = np.zeros(len(candidates), dtype=np.float64)
     gfi_boost = np.zeros(len(candidates), dtype=np.float64)
-    hn_boost = np.zeros(len(candidates), dtype=np.float64)
+    gha_boost = np.zeros(len(candidates), dtype=np.float64)
     if interest_text.strip():
         it = interest_text.lower()
-        hn_interest = any(
+        gha_interest = any(
             k in it
-            for k in ("hacker news", "hackernews", " hn ", "hn threads", "infra threads", "ml threads", "discussions")
+            for k in ("github archive", "gh archive", "gharchive", "archive events", "public timeline", "issue event")
         )
         for i, dom in enumerate(candidates["domain"].astype(str)):
             d = dom.lower()
             src = str(candidates.iloc[i].get("source", "")).lower()
-            if hn_interest and src == "hackernews":
-                hn_boost[i] += 0.55 if devops_mode or trend_mode else 0.40
+            if gha_interest and src == "gharchive":
+                gha_boost[i] += 0.55 if devops_mode or trend_mode else 0.40
             if "devops" in it or "kubernetes" in it or "terraform" in it:
                 if "devops" in d:
                     kw_boost[i] += 0.35
@@ -237,7 +234,7 @@ def rerank(
             + 0.12 * kw_boost
             + 0.35 * gfi_boost
             + 0.12 * niche_boost
-            + 0.18 * hn_boost
+            + 0.18 * gha_boost
         )
     else:
         effort_term = cfg.w_effort * effort
@@ -252,7 +249,7 @@ def rerank(
             + 0.12 * kw_boost
             + 0.35 * gfi_boost
             + 0.12 * niche_boost
-            + 0.18 * hn_boost
+            + 0.18 * gha_boost
         )
         if portfolio_mode:
             final = final + 0.10 * (1.0 - effort)

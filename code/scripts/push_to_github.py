@@ -26,7 +26,7 @@ from engageiq.secrets import load_env
 OWNER = "shprasa"
 REPO = "engageiq-bax423-final"
 BRANCH = "main"
-COMMIT_MSG = "Fix devops_mode UnboundLocalError in ranking + Discover UI clarity"
+COMMIT_MSG = "Replace Hacker News with GitHub Archive as second data source"
 
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "_tmp_engageiq_docx", ".cursor"}
 SKIP_NAMES = {".env", "engageiq.duckdb", "engageiq.duckdb.wal", "Thumbs.db", ".DS_Store"}

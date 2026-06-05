@@ -62,13 +62,12 @@ def _template_suggestion(row: pd.Series, interest: str = "") -> str:
             f"pick a docs/test issue matching {domain}, and open a PR describing your change "
             f"({stars:,} stars — prioritize active threads with maintainer replies)."
         )
-    if src == "hackernews":
-        pts = int(float(row.get("upvotes") or 0))
+    if src == "gharchive":
         com = int(float(row.get("comments") or 0))
         return (
-            f"Given your interest in {focus}: read \"{headline[:70]}\" ({pts:,} pts, {com:,} comments), "
-            "note one concrete takeaway, then post a 5–8 sentence HN reply linking it to your experience "
-            "and asking one follow-up question."
+            f"For your {focus} goals: open \"{headline[:70]}\" on {community}, "
+            f"read the issue/PR context ({com:,} comments), then leave a helpful comment "
+            "or open a small follow-up PR linked to the thread."
         )
     return (
         f"Review \"{headline[:70]}\" against your {focus} profile in {domain}; "

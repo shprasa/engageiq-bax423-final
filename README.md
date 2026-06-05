@@ -3,7 +3,7 @@
 **Student:** Shivneel Prasad  
 **Course:** BAX-423 Big Data · UC Davis GSM · Spring 2026
 
-Smart engagement opportunity scorer across GitHub and Hacker News.
+Smart engagement opportunity scorer across GitHub API and GitHub Archive.
 
 ## Live demo
 
@@ -43,7 +43,7 @@ py scripts/build_snapshot.py
 
 ## Six core capabilities
 
-1. Multi-source ingest + dedup (GitHub + Hacker News → DuckDB)
+1. Multi-source ingest + dedup (GitHub API + GitHub Archive → DuckDB)
 2. Embeddings + ANN retrieval
 3. Multi-stage ranking + NDCG@10
 4. Adaptive learning / RL (50+ rounds)

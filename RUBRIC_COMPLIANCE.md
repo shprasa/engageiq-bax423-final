@@ -38,7 +38,7 @@
 
 | Required sub-item | Status | Evidence |
 |-------------------|--------|----------|
-| ≥2 data sources | ✅ | GitHub (4,964) + Hacker News (5,036) in snapshot |
+| ≥2 data sources | ✅ | GitHub API (4,964) + GitHub Archive (5,036) in snapshot |
 | Real-time / streaming pipeline | ✅ | Sidebar: Produce batch → Consume → DuckDB (`streaming.py`) |
 | Deduplication | ✅ | URL dedup in stream queue + DuckDB ingest |
 | Structured storage | ✅ | DuckDB `opportunities` table (`data.py`) |

@@ -1,22 +1,22 @@
 {
   "dataset": {
-    "dataset_rows": 10000,
-    "live_rows": 1964,
+    "dataset_rows": 10944,
+    "live_rows": 2908,
     "synthetic_rows": 8036,
     "domains": 15,
     "sources": {
-      "hackernews": 5036,
-      "github": 4964
+      "gharchive": 6000,
+      "github": 4944
     },
     "live_by_source": {
-      "hackernews": 1036,
-      "github": 928
+      "gharchive": 2000,
+      "github": 908
     }
   },
   "ingest_benchmark": {
     "sources": {
-      "hackernews": 5036,
-      "github": 4964
+      "gharchive": 6000,
+      "github": 4944
     },
     "domains_present": 15,
     "domains_required": 15,
@@ -26,15 +26,15 @@
   "personas": [
     {
       "persona": "Sofia (ML Student / Portfolio Builder)",
-      "ndcg10": 0.9326888191250972,
-      "top10_github_gfi": 7,
+      "ndcg10": 0.9279641043683683,
+      "top10_github_gfi": 10,
       "top10_cpp_rust": 0,
-      "top10_ml_hits": 10,
+      "top10_ml_hits": 9,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 0,
       "pass_sofia": true,
       "pass_david": false,
-      "pass_lina": true,
+      "pass_lina": false,
       "pass_raj": false,
       "capability_pass": {
         "1 Multi-source ingest + streaming": "PASS",
@@ -70,10 +70,10 @@
       "persona": "Lina (Data Journalist / Trend Spotter)",
       "ndcg10": 0.0,
       "top10_github_gfi": 0,
-      "top10_cpp_rust": 3,
-      "top10_ml_hits": 0,
+      "top10_cpp_rust": 0,
+      "top10_ml_hits": 2,
       "top10_infra_hits": 0,
-      "top10_devtools_hits": 0,
+      "top10_devtools_hits": 1,
       "pass_sofia": false,
       "pass_david": false,
       "pass_lina": true,
@@ -91,7 +91,7 @@
       "persona": "Raj (Startup Founder / Marketing-Focused)",
       "ndcg10": 1.0,
       "top10_github_gfi": 0,
-      "top10_cpp_rust": 2,
+      "top10_cpp_rust": 0,
       "top10_ml_hits": 0,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 10,

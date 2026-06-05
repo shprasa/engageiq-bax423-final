@@ -48,19 +48,19 @@ from engageiq.ui import (
 PERSONAS: dict[str, str] = {
     "Sofia (ML Student / Portfolio Builder)": (
         "Machine learning, NLP, data pipelines, beginner-friendly open source, good first issues, "
-        "Python, pandas, GitHub issues, Hacker News ML threads."
+        "Python, pandas, GitHub issues, GitHub Archive ML issue events."
     ),
     "David (DevOps / Niche Community)": (
         "Kubernetes, Terraform, CI/CD, observability, cloud-native infra, high-activity repos, "
-        "few contributors, Hacker News infra threads."
+        "few contributors, GitHub Archive DevOps issue and PR events."
     ),
     "Lina (Data Journalist / Trend Spotter)": (
         "Trending repos, viral discussions, emerging tools, fast-growing communities, recency, velocity, "
-        "Hacker News, GitHub trending, multi-domain velocity."
+        "GitHub Archive public timeline events, GitHub trending, multi-domain velocity."
     ),
     "Raj (Startup Founder / Marketing-Focused)": (
         "Developer tools, APIs, CLI tools, open-source business, B2B SaaS, discussions where devtools are relevant, "
-        "Hacker News and GitHub developer-tools communities."
+        "GitHub Archive and GitHub developer-tools communities."
     ),
 }
 
@@ -112,7 +112,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 12}
+    return store, {"paths": paths, "version": 13}
 
 
 @st.cache_resource
@@ -275,7 +275,7 @@ def main() -> None:
         live_only = st.toggle(
             "Rank from live API pool only",
             value=True,
-            help="When on, ranking uses live GitHub + Hacker News URLs. Turn off to include offline backup rows in the ranked pool.",
+            help="When on, ranking uses live GitHub API + GitHub Archive URLs. Turn off to include offline backup rows in the ranked pool.",
         )
         english_only = st.toggle("English only", value=True)
 
@@ -318,7 +318,7 @@ def main() -> None:
     render_hero(
         title="EngageIQ — Engagement Opportunity Scorer",
         subtitle=(
-            f"{len(df):,} opportunities · {live_n:,} live GitHub & Hacker News · "
+            f"{len(df):,} opportunities · {live_n:,} live GitHub API & GitHub Archive · "
             f"{domain_count} domains · TF-IDF retrieval + multi-stage ranking + RL bandit"
         ),
         stats={
@@ -346,7 +346,7 @@ def main() -> None:
     ndcg_val = ndcg_at_k(labels, 10)
     live_in_results = int(live_mask(ranked).sum())
     pool_gh = int((ranked["source"].astype(str).str.lower() == "github").sum())
-    pool_hn = int((ranked["source"].astype(str).str.lower() == "hackernews").sum())
+    pool_gha = int((ranked["source"].astype(str).str.lower() == "gharchive").sum())
 
     with tab_discover:
         persona_short = persona.split("(")[0].strip()
@@ -355,10 +355,10 @@ def main() -> None:
         st.markdown(f"### Opportunities for **{persona_short}**")
         st.markdown(
             '<div class="discover-help-box">'
-            "<strong>How this works:</strong> We search GitHub and Hacker News for items that match "
-            "what you typed in the sidebar. Each card is a real place you could comment, contribute, "
-            "or join a discussion. Use the <strong>Sort &amp; filter</strong> section below to change "
-            "what you see — for example, show only Hacker News or the quickest tasks first."
+            "<strong>How this works:</strong> We search the GitHub API and GitHub Archive public event stream "
+            "for items that match what you typed in the sidebar. Each card is a real place you could comment, "
+            "contribute, or join a discussion. Use the <strong>Sort &amp; filter</strong> section below to change "
+            "what you see — for example, show only GitHub Archive events or the quickest tasks first."
             "</div>",
             unsafe_allow_html=True,
         )
@@ -370,14 +370,14 @@ def main() -> None:
             help="How well the top results fit your sidebar interests. 100% = strong fit.",
         )
         m2.metric(
-            "GitHub in list",
+            "GitHub API in list",
             pool_gh,
-            help="Number of GitHub repos/issues in the current ranked list (before your filters).",
+            help="Number of GitHub API repos/issues in the current ranked list (before your filters).",
         )
         m3.metric(
-            "Hacker News in list",
-            pool_hn,
-            help="Number of Hacker News threads in the current ranked list (before your filters).",
+            "GitHub Archive in list",
+            pool_gha,
+            help="Number of GitHub Archive events in the current ranked list (before your filters).",
         )
         m4.metric(
             "Live from web",
@@ -392,7 +392,7 @@ def main() -> None:
             '<div class="discover-filter-panel"><h4>Sort & filter</h4></div>',
             unsafe_allow_html=True,
         )
-        st.caption("Change order or narrow results. Example: pick **Hacker News only** or **Quickest to contribute**.")
+        st.caption("Change order or narrow results. Example: pick **GitHub Archive only** or **Quickest to contribute**.")
 
         r1c1, r1c2, r1c3, r1c4 = st.columns(4)
         sort_by = r1c1.selectbox(
@@ -403,7 +403,7 @@ def main() -> None:
         source_filter = r1c2.selectbox(
             "Platform",
             options=list(SOURCE_FILTER_OPTIONS.keys()),
-            help="Show everything, or only GitHub, or only Hacker News.",
+            help="Show everything, GitHub API search results only, or GitHub Archive events only.",
         )
         origin_filter = r1c3.selectbox(
             "Live or offline",
@@ -443,7 +443,7 @@ def main() -> None:
             st.markdown(
                 f"""
 - **Interest match ({match_pct}%)** — Ranking quality metric (NDCG@10 = {ndcg_val:.3f}). Measures how well top results match your interest keywords.
-- **GitHub / Hacker News in list** — How many of each platform appear in the ranked pool of up to 100 items.
+- **GitHub API / GitHub Archive in list** — How many of each source appear in the ranked pool of up to 100 items.
 - **Live from web** — Count of items with real API-scraped URLs (vs. offline `example.local` backup rows).
 - **Sort & filter** — Client-side view controls; does not re-run the ML model, only re-orders/filters the ranked pool.
                 """
@@ -456,8 +456,8 @@ def main() -> None:
                     "Offline rows are excluded from ranking right now. In the sidebar, turn off "
                     "**Rank from live API pool only**, then set **Live or offline → Offline practice data**."
                 )
-            elif source_filter == "Hacker News only" and pool_hn == 0:
-                hint = "Try loading the **Lina** or **David** persona — they surface more Hacker News threads."
+            elif source_filter == "GitHub Archive only" and pool_gha == 0:
+                hint = "Try loading the **Lina** or **David** persona — they surface more GitHub Archive events."
             st.info(f"No results match your filters. {hint}")
         else:
             for rank_idx, (_, row) in enumerate(displayed.iterrows(), start=1):

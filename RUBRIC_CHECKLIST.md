@@ -30,7 +30,7 @@
 |------|--------|
 | 10,000 rows | ✅ |
 | 15/15 domains | ✅ |
-| GitHub + Hacker News sources | ✅ |
+| GitHub API + GitHub Archive sources | ✅ |
 | 1,964 live API rows | ✅ |
 
 ## Personas (all PASS on 6 capabilities)

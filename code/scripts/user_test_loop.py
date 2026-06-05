@@ -129,7 +129,7 @@ def check_dataset_size(report: Report, df: pd.DataFrame) -> None:
     if len(by_src) < 2:
         _fail(report, name, f"Need >=2 live API sources, got {by_src.to_dict()}")
         return
-    for src in ("github", "hackernews"):
+    for src in ("github", "gharchive"):
         if int(by_src.get(src, 0)) < 100:
             _fail(report, name, f"Need >=100 live {src} rows, got {by_src.get(src, 0)}")
             return
@@ -141,7 +141,7 @@ def check_live_card_titles(report: Report, df: pd.DataFrame) -> None:
     live = df[live_mask(df)]
     bad: list[str] = []
 
-    for src in ("github", "hackernews"):
+    for src in ("github", "gharchive"):
         sample = live[live["source"] == src].head(50)
         for _, row in sample.iterrows():
             title = display_title(row)
@@ -338,7 +338,7 @@ def check_suggest_action(report: Report, df: pd.DataFrame) -> None:
     from engageiq.suggestions import generate_suggestion
 
     live = df[live_mask(df)]
-    for src in ("github", "hackernews"):
+    for src in ("github", "gharchive"):
         sample = live[live["source"] == src].head(3)
         for _, row in sample.iterrows():
             suggestion = generate_suggestion(row, "machine learning developer tools")
@@ -356,8 +356,8 @@ def _check_multi_source_ingest(report: Report, df: pd.DataFrame) -> None:
     from engageiq.domains import DOMAINS
 
     sources = set(df["source"].dropna().astype(str).str.lower().unique())
-    if not {"github", "hackernews"}.issubset(sources):
-        _fail(report, name, f"Need GitHub + Hacker News sources, got {sorted(sources)}")
+    if not {"github", "gharchive"}.issubset(sources):
+        _fail(report, name, f"Need GitHub API + GitHub Archive sources, got {sorted(sources)}")
         return
     present = set(df["domain"].dropna().astype(str).unique())
     missing = sorted(set(DOMAINS) - present)

@@ -153,11 +153,13 @@ def opportunity_type_label(row: pd.Series) -> str:
         if _is_github_issue(row):
             return "GitHub Issue · Good First Issue" if _safe_int(row.get("good_first_issue")) == 1 else "GitHub Issue"
         return "GitHub Repository"
-    if src == "hackernews":
+    if src == "gharchive":
         url = str(row.get("url") or "")
-        if "news.ycombinator.com/item" in url:
-            return "Hacker News Discussion"
-        return "Hacker News Story"
+        if "/issues/" in url:
+            return "GitHub Archive · Issue Event"
+        if "/pull/" in url:
+            return "GitHub Archive · Pull Request Event"
+        return "GitHub Archive · Event"
     return "Engagement Opportunity"
 
 
@@ -168,9 +170,13 @@ def short_source_label(row: pd.Series) -> str:
         if _is_github_issue(row):
             return "GitHub GFI" if _safe_int(row.get("good_first_issue")) == 1 else "GitHub issue"
         return "GitHub repo"
-    if src == "hackernews":
+    if src == "gharchive":
         url = str(row.get("url") or "")
-        return "HN thread" if "news.ycombinator.com/item" in url else "HN story"
+        if "/issues/" in url:
+            return "GH Archive issue"
+        if "/pull/" in url:
+            return "GH Archive PR"
+        return "GH Archive event"
     return "Opportunity"
 
 
@@ -200,8 +206,8 @@ def display_title(row: pd.Series) -> str:
             return community
         return title or community or "GitHub repository"
 
-    if src == "hackernews":
-        return title or "Hacker News story"
+    if src == "gharchive":
+        return title or "GitHub Archive event"
 
     if title.lower().startswith(f"{row.get('domain', '')} - opportunity".lower()):
         return text or title
@@ -231,12 +237,13 @@ def display_subtitle(row: pd.Series) -> str:
             parts.append(lang)
         return " · ".join(parts) if parts else "Open-source project on GitHub"
 
-    if src == "hackernews":
-        pts = int(float(row.get("upvotes") or 0))
+    if src == "gharchive":
         com = int(float(row.get("comments") or 0))
-        parts = [f"{pts:,} points", f"{com:,} comments"]
+        parts = [f"{com:,} comments"]
         if author:
             parts.append(f"by {author}")
+        if community:
+            parts.append(community)
         return " · ".join(parts)
 
     return str(row.get("domain") or "")
@@ -264,13 +271,13 @@ def display_summary(row: pd.Series) -> str:
         bits.append("Browse issues and README to find a contribution entry point.")
         return " ".join(bits)
 
-    if src == "hackernews":
+    if src == "gharchive":
         if text and text.lower() != title.lower():
             return text
-        url = str(row.get("url") or "")
-        if "news.ycombinator.com/item" in url:
-            return f"Active Hacker News thread with {int(float(row.get('comments') or 0)):,} comments — join the technical discussion."
-        return f"Trending link shared on Hacker News ({int(float(row.get('upvotes') or 0)):,} points). Read the article, then add a substantive comment on the discussion thread."
+        return (
+            f"Public GitHub Archive event on {row.get('community', 'a repository')} — "
+            f"review the issue/PR and add a comment or small contribution."
+        )
 
     return text or f"Opportunity in {row.get('domain', 'this domain')}."
 
@@ -297,12 +304,11 @@ def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
         is_gfi = _safe_int(row.get("good_first_issue")) == 1
         if is_gfi and not _is_github_issue(row):
             facts.append(("GFI", "Yes"))
-    elif src == "hackernews":
-        facts.append(("Points", f"{int(float(row.get('upvotes') or 0)):,}"))
-        facts.append(("Comments", f"{int(float(row.get('comments') or 0)):,}"))
-        author = str(row.get("author") or "").strip()
-        if author:
-            facts.append(("Author", author))
+    elif src == "gharchive":
+        if _has_value(row.get("comments")):
+            facts.append(("Comments", f"{int(float(row.get('comments') or 0)):,}"))
+        if community := str(row.get("community") or "").strip():
+            facts.append(("Repo", _truncate_text(community, 22)))
 
     author = str(row.get("author") or "").strip()
     if author and not any(k == "Author" for k, _ in facts):
@@ -352,8 +358,8 @@ SORT_OPTIONS: dict[str, tuple[str, bool]] = {
 
 SOURCE_FILTER_OPTIONS: dict[str, str | None] = {
     "All sources": None,
-    "GitHub only": "github",
-    "Hacker News only": "hackernews",
+    "GitHub API only": "github",
+    "GitHub Archive only": "gharchive",
 }
 
 ORIGIN_FILTER_OPTIONS: dict[str, str | None] = {
@@ -408,10 +414,10 @@ def source_mix_summary(df: pd.DataFrame) -> str:
     if df.empty:
         return "No results"
     gh = int((df["source"].astype(str).str.lower() == "github").sum())
-    hn = int((df["source"].astype(str).str.lower() == "hackernews").sum())
+    gha = int((df["source"].astype(str).str.lower() == "gharchive").sum())
     live_n = int(live_mask(df).sum())
     offline_n = len(df) - live_n
-    return f"{len(df)} items ({gh} GitHub, {hn} Hacker News, {live_n} live, {offline_n} offline)"
+    return f"{len(df)} items ({gh} GitHub API, {gha} GitHub Archive, {live_n} live, {offline_n} offline)"
 
 
 def sort_ranked_results(df: pd.DataFrame, sort_by: str = "Best match to your interests") -> pd.DataFrame:

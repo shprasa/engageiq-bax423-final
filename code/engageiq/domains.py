@@ -19,66 +19,66 @@ DOMAINS: list[str] = [
     "Beginner Coding",
 ]
 
-# Search keywords per domain for GitHub and Hacker News scrapers.
+# Search keywords per domain for GitHub API and GitHub Archive scrapers.
 DOMAIN_QUERIES: dict[str, dict[str, list[str]]] = {
     "Machine Learning": {
         "github": ["machine-learning", "pytorch", "scikit-learn"],
-        "hn": ["machine learning", "pytorch", "llm"],
+        "gharchive": ["machine-learning", "pytorch", "llm", "ml"],
     },
     "DevOps/K8s": {
         "github": ["kubernetes", "terraform", "devops"],
-        "hn": ["kubernetes", "terraform", "devops"],
+        "gharchive": ["kubernetes", "terraform", "devops", "k8s"],
     },
     "Trending Open-Source": {
         "github": ["open-source", "trending"],
-        "hn": ["open source", "github"],
+        "gharchive": ["open-source", "trending", "github"],
     },
     "Developer Tools": {
         "github": ["developer-tools", "cli", "vscode"],
-        "hn": ["developer tools", "cli"],
+        "gharchive": ["developer-tools", "cli", "vscode"],
     },
     "Cybersecurity": {
         "github": ["security", "cybersecurity"],
-        "hn": ["security", "cve"],
+        "gharchive": ["security", "cve", "vulnerability"],
     },
     "Frontend (React/Web)": {
         "github": ["react", "frontend", "nextjs"],
-        "hn": ["react", "frontend"],
+        "gharchive": ["react", "frontend", "nextjs"],
     },
     "B2B SaaS": {
         "github": ["saas", "b2b"],
-        "hn": ["saas", "b2b"],
+        "gharchive": ["saas", "b2b"],
     },
     "Blockchain": {
         "github": ["blockchain", "ethereum"],
-        "hn": ["blockchain", "ethereum"],
+        "gharchive": ["blockchain", "ethereum", "web3"],
     },
     "Python Data Eng": {
         "github": ["data-engineering", "apache-spark", "airflow"],
-        "hn": ["data engineering", "spark"],
+        "gharchive": ["data-engineering", "spark", "airflow"],
     },
     "GameDev (C++)": {
         "github": ["gamedev", "unreal-engine"],
-        "hn": ["gamedev", "unity"],
+        "gharchive": ["gamedev", "unity", "unreal"],
     },
     "AI Research": {
         "github": ["deep-learning", "transformers", "llm"],
-        "hn": ["ai research", "transformer"],
+        "gharchive": ["transformer", "llm", "research"],
     },
     "Embedded Systems (C/RTOS)": {
         "github": ["embedded", "rtos", "arduino"],
-        "hn": ["embedded", "rtos"],
+        "gharchive": ["embedded", "rtos", "arduino"],
     },
     "Cloud APIs": {
         "github": ["cloud-api", "aws", "serverless"],
-        "hn": ["aws", "cloud api"],
+        "gharchive": ["aws", "cloud", "serverless"],
     },
     "Mobile Dev (iOS/Flutter)": {
         "github": ["flutter", "ios", "swiftui"],
-        "hn": ["flutter", "ios"],
+        "gharchive": ["flutter", "ios", "swift"],
     },
     "Beginner Coding": {
         "github": ["good-first-issue", "beginner-friendly"],
-        "hn": ["learn programming", "beginner"],
+        "gharchive": ["good-first-issue", "beginner", "first issue"],
     },
 }
