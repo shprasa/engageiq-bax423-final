@@ -11,7 +11,7 @@
 |------|----------|--------|
 | `code/` + `requirements.txt` + README | Yes | Done |
 | Single-command run | Yes | `cd code && py -m streamlit run app.py` |
-| `data/` snapshot >=10,000 | Yes | 11,964 rows |
+| `data/` snapshot >=10,000 | Yes | 10,000 rows (GitHub + HN only) |
 | `brief.pdf` <=4 pages | Yes | Regenerated with live stats |
 | `prompts.md` | Yes | Done |
 | Live public URL | Yes | Streamlit Cloud |
@@ -31,10 +31,10 @@
 
 | # | Capability | Status |
 |---|------------|--------|
-| 1 | Multi-source ingest + streaming + dedup | Done |
+| 1 | Multi-source ingest + streaming + dedup | Done | Produce → consume queue + Bloom + optional Kafka |
 | 2 | Embeddings + ANN retrieval | Done |
 | 3 | Multi-stage ranking + NDCG@10 | Done |
-| 4 | Adaptive learning / RL (50+ rounds) | Done | Thompson sampling contextual bandit |
+| 4 | Adaptive learning / RL (50+ rounds) | Done | +0.7 reward vs random baseline (60 rounds) |
 | 5 | Batch analytics + trends | Done |
 | 6 | Dashboard + brief export | Done |
 
@@ -47,7 +47,9 @@
 | Activity log + CSV export | Done |
 | Real URLs + descriptions on cards | Done |
 | Source-specific titles + decision facts on cards | Done |
-| Automated user-test loop (`scripts/user_test_loop.py`) | Done — 11/11 checks |
+| Suggested actions (LLM optional) | Done | OpenAI when `OPENAI_API_KEY` set; templates otherwise |
+| Streaming pipeline UI | Done | Sidebar: Produce batch → Consume (dedup → DuckDB) |
+| Automated user-test loop | Done — 14/14 checks |
 | Live vs offline backup badges | Done |
 
 ## Before Canvas upload (your actions)
