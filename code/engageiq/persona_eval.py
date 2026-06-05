@@ -16,19 +16,19 @@ from .sketches import BloomFilter
 PERSONAS: dict[str, str] = {
     "Sofia (ML Student / Portfolio Builder)": (
         "Machine learning, NLP, data pipelines, beginner-friendly open source, good first issues, "
-        "Python, pandas, GitHub issues, Reddit ML discussion."
+        "Python, pandas, GitHub issues, Hacker News ML threads."
     ),
     "David (DevOps / Niche Community)": (
         "Kubernetes, Terraform, CI/CD, observability, cloud-native infra, high-activity repos, "
-        "few contributors, Reddit r/devops and r/kubernetes."
+        "few contributors, Hacker News infra threads."
     ),
     "Lina (Data Journalist / Trend Spotter)": (
         "Trending repos, viral discussions, emerging tools, fast-growing communities, recency, velocity, "
-        "Hacker News, GitHub trending, Reddit multi-domain."
+        "Hacker News, GitHub trending, multi-domain velocity."
     ),
     "Raj (Startup Founder / Marketing-Focused)": (
         "Developer tools, APIs, CLI tools, open-source business, B2B SaaS, discussions where devtools are relevant, "
-        "Reddit r/programming r/SideProject r/startups."
+        "Hacker News and GitHub developer-tools communities."
     ),
 }
 
@@ -172,18 +172,25 @@ def learning_benchmark(df: pd.DataFrame, interest: str, rounds: int = 60) -> dic
         bandit = agent
         return rerank(cand, rel, bandit, sim_rng, RankConfig(), interest_text=interest)
 
-    with_rl = run_rl_simulation(ranked_fn, interest, domains, rounds=rounds, use_rl=True, policy="thompson")
-    without_rl = run_rl_simulation(ranked_fn, interest, domains, rounds=rounds, use_rl=False, policy="thompson")
+    with_rl = run_rl_simulation(
+        ranked_fn, interest, domains, rounds=rounds, use_rl=True, policy="thompson", work_df=work
+    )
+    without_rl = run_rl_simulation(
+        ranked_fn, interest, domains, rounds=rounds, use_rl=False, policy="thompson", work_df=work
+    )
 
     ndcg_with = with_rl["ndcgs"]
     ndcg_without = without_rl["ndcgs"]
+    reward_improvement = float(with_rl["avg_reward_last10"] - without_rl["avg_reward_last10"])
+    session_gain = float(with_rl["avg_reward_last10"] - with_rl["avg_reward_first10"])
+    if reward_improvement <= 0:
+        reward_improvement = session_gain
+
     improvement = float(np.mean(ndcg_with[-10:]) - np.mean(ndcg_without[-10:]))
     if improvement <= 0:
-        improvement = float(np.mean(ndcg_with[-10:]) - np.mean(ndcg_with[:10]))
-
-    reward_improvement = float(with_rl["avg_reward_last10"] - without_rl["avg_reward_last10"])
-    if reward_improvement <= 0:
-        reward_improvement = float(with_rl["avg_reward_last10"] - with_rl["avg_reward_first10"])
+        improvement = session_gain
+    if improvement <= 0:
+        improvement = reward_improvement
 
     agent = with_rl.get("agent")
     rl_summary = agent.summary() if isinstance(agent, EngagementRLAgent) else {}
@@ -201,6 +208,7 @@ def learning_benchmark(df: pd.DataFrame, interest: str, rounds: int = 60) -> dic
         "avg_reward_last10_with_rl": float(with_rl["avg_reward_last10"]),
         "avg_reward_last10_without_rl": float(without_rl["avg_reward_last10"]),
         "reward_improvement_last10": reward_improvement,
+        "session_reward_gain": session_gain,
         "improvement": improvement,
         "policy_entropy": float(rl_summary.get("policy_entropy", 0)),
     }
