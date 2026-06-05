@@ -19,7 +19,7 @@ In Streamlit **Settings → Secrets**, paste:
 GITHUB_TOKEN = "your_token"
 ```
 
-Reddit keys optional.
+Reddit removed from scope; GitHub + HN only.
 
 ## 4) Verify
 
