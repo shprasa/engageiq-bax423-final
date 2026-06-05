@@ -8,7 +8,15 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from engageiq.data_utils import describe_opportunity, escape_html, format_created, is_live_url, opportunity_meta
+from engageiq.data_utils import (
+    decision_facts,
+    display_subtitle,
+    display_summary,
+    display_title,
+    estimated_engagement_time,
+    is_live_url,
+    opportunity_type_label,
+)
 
 Action = Literal["engage", "bookmark", "skip", "unbookmark"]
 
@@ -416,11 +424,12 @@ def log_activity(entry: ActivityEntry) -> None:
 
 def record_feedback(row: pd.Series, action: Action) -> None:
     opp_id = int(row["id"])
-    desc = describe_opportunity(row)
+    headline = display_title(row)
+    summary = display_summary(row)
     entry = ActivityEntry(
         opp_id=opp_id,
         action=action,
-        title=str(row["title"]),
+        title=headline,
         url=str(row["url"]),
         domain=str(row["domain"]),
         source=str(row["source"]),
@@ -430,12 +439,12 @@ def record_feedback(row: pd.Series, action: Action) -> None:
 
     bm = BookmarkEntry(
         opp_id=opp_id,
-        title=str(row["title"]),
+        title=headline,
         url=str(row["url"]),
         domain=str(row["domain"]),
         source=str(row["source"]),
         score_final=float(row.get("score_final", 0)),
-        description=desc,
+        description=summary,
     )
     if action == "bookmark":
         st.session_state.bookmarks[opp_id] = bm.to_dict()
@@ -483,23 +492,44 @@ def render_opportunity_card(
     url = str(row["url"])
     row_dict = row.to_dict()
 
+    headline = display_title(row)
+    subtitle = display_subtitle(row)
+    summary = display_summary(row)
+    type_label = opportunity_type_label(row)
+    est_time = estimated_engagement_time(row)
+    facts = decision_facts(row)
+
     with st.container(border=True):
-        title_line = f"**#{rank} · {row['title']}**"
+        header = f"### #{rank} · {headline}"
         if bookmarked:
-            title_line += " · :orange[★ Saved]"
-        st.markdown(title_line)
+            header += " · :orange[★ Saved]"
+        st.markdown(header)
 
         origin = ":green[Live API]" if is_live_url(url) else ":gray[Offline backup]"
-        st.markdown(
-            f":blue[{_source_label(str(row['source']))}] · {origin} · **{row['domain']}**"
-        )
-        st.caption(opportunity_meta(row))
-        st.write(describe_opportunity(row))
+        st.markdown(f"{origin} · **{type_label}** · **{row['domain']}**")
+        if subtitle:
+            st.caption(subtitle)
 
-        link_col, _ = st.columns([1, 3])
-        with link_col:
+        st.markdown(summary)
+
+        fact_cols = st.columns(min(4, max(1, len(facts))))
+        for i, (label, value) in enumerate(facts[:4]):
+            fact_cols[i].metric(label, value)
+
+        if len(facts) > 4:
+            with st.expander("More details"):
+                for label, value in facts[4:]:
+                    st.write(f"**{label}:** {value}")
+                st.caption(f"URL: {url}")
+
+        c_link, c_time = st.columns([2, 1])
+        with c_link:
             if is_live_url(url):
-                st.link_button("Open opportunity ↗", url, use_container_width=True)
+                st.link_button("Open on source site ↗", url, use_container_width=True)
+            else:
+                st.caption(url)
+        with c_time:
+            st.metric("Est. time", est_time.split(" (")[0].replace("< ", "<"))
 
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Relevance", f"{float(row.get('score_relevance', 0)):.2f}")
@@ -508,12 +538,13 @@ def render_opportunity_card(
         m4.metric("Effort", f"{float(row.get('score_effort', 0)):.2f}")
 
         if str(row.get("source", "")) == "github" and int(row.get("good_first_issue") or 0) == 1:
-            st.success("Good first issue — beginner-friendly contribution opportunity")
+            st.success("Good first issue — beginner-friendly, typically < 1 hour to start")
 
         st.markdown(f"**Why ranked here:** {explain}")
         st.info(f"**Suggested action:** {suggest}")
 
         if show_actions:
+            st.caption(f"Estimated engagement: {est_time}")
             b1, b2, b3 = st.columns(3)
             if b1.button("Engage", key=f"{key_prefix}_engage_{int(row['id'])}", use_container_width=True, type="primary"):
                 st.session_state._pending_action = ("engage", row_dict)
@@ -605,11 +636,11 @@ def render_bookmarks_list() -> None:
         with st.container(border=True):
             st.markdown(f"**#{i} · {b['title']}**")
             origin = ":green[Live API]" if is_live_url(url) else ":gray[Offline backup]"
-            st.markdown(f":blue[{_source_label(b['source'])}] · {origin} · **{b['domain']}**")
+            st.markdown(f"**{origin}** · **{b['domain']}**")
             if b.get("description"):
                 st.write(b["description"])
             if is_live_url(url):
-                st.link_button("Open ↗", url, key=f"open_bm_{b['opp_id']}")
+                st.link_button("Open on source site ↗", url, key=f"open_bm_{b['opp_id']}")
             st.caption(
                 f"Saved {b.get('bookmarked_at', '—')} · Score {float(b.get('score_final', 0)):.2f}"
             )
