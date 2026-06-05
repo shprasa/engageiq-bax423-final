@@ -1,5 +1,5 @@
 {
-  "passed": 12,
+  "passed": 14,
   "failed": 0,
   "warnings": [],
   "failures": [],
@@ -14,7 +14,9 @@
     "live_only_ranking",
     "plain_text_summaries",
     "persona_benchmarks",
+    "streaming_pipeline",
     "user_session_simulation",
+    "rl_improvement",
     "suggest_action_quality"
   ]
 }
