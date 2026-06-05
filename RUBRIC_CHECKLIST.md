@@ -46,7 +46,8 @@
 | Bookmarks tab | Done |
 | Activity log + CSV export | Done |
 | Real URLs + descriptions on cards | Done |
-| Open link buttons | Done |
+| Source-specific titles + decision facts on cards | Done |
+| Automated user-test loop (`scripts/user_test_loop.py`) | Done — 11/11 checks |
 | Live vs offline backup badges | Done |
 
 ## Before Canvas upload (your actions)
