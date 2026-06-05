@@ -10,7 +10,6 @@ from .reinforcement_learning import EngagementRLAgent, run_rl_simulation
 from .embedding import build_index
 from .ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
 from .data_utils import is_live_url
-from .sketches import BloomFilter
 
 
 PERSONAS: dict[str, str] = {
@@ -143,15 +142,19 @@ def evaluate_personas(df: pd.DataFrame, learning_ok: bool = True) -> list[Person
     return results
 
 
-def sketch_benchmark(df: pd.DataFrame) -> dict[str, float]:
-    bloom = BloomFilter(capacity=max(1000, len(df)), fp_rate=0.01)
-    dupes = 0
-    for _, r in df.iterrows():
-        key = str(r["url"])
-        if key in bloom:
-            dupes += 1
-        bloom.add(key)
-    return {"duplicate_urls_in_dataset": float(dupes), "unique_after_bloom": float(len(df) - dupes)}
+def ingest_benchmark(df: pd.DataFrame) -> dict[str, float | dict]:
+    from .domains import DOMAINS
+
+    sources = df["source"].value_counts().to_dict()
+    present = set(df["domain"].dropna().astype(str).unique())
+    missing = sorted(set(DOMAINS) - present)
+    return {
+        "sources": sources,
+        "domains_present": int(len(present)),
+        "domains_required": len(DOMAINS),
+        "missing_domains": missing,
+        "duplicate_urls": float(df.duplicated(subset=["url"]).sum()),
+    }
 
 
 def learning_benchmark(df: pd.DataFrame, interest: str, rounds: int = 60) -> dict[str, float]:

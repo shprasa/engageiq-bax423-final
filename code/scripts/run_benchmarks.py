@@ -10,7 +10,7 @@ if str(CODE_DIR) not in sys.path:
 
 from engageiq.config import get_paths
 from engageiq.data import OpportunityStore
-from engageiq.persona_eval import PERSONAS, dataset_stats, evaluate_personas, learning_benchmark, sketch_benchmark
+from engageiq.persona_eval import PERSONAS, dataset_stats, evaluate_personas, ingest_benchmark, learning_benchmark
 
 
 def main() -> None:
@@ -29,7 +29,7 @@ def main() -> None:
 
     payload = {
         "dataset": dataset_stats(df),
-        "sketch_benchmark": sketch_benchmark(df),
+        "ingest_benchmark": ingest_benchmark(df),
         "personas": [{**r.__dict__, "capability_pass": r.capability_pass} for r in persona_results],
         "learning_benchmark": learning,
     }

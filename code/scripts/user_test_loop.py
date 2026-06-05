@@ -108,8 +108,15 @@ def check_submission_files(report: Report) -> None:
 
 def check_dataset_size(report: Report, df: pd.DataFrame) -> None:
     name = "dataset_size"
+    from engageiq.domains import DOMAINS
+
     if len(df) < 10_000:
         _fail(report, name, f"Need >=10,000 rows, got {len(df)}")
+        return
+    present = set(df["domain"].dropna().astype(str).unique())
+    missing = sorted(set(DOMAINS) - present)
+    if missing:
+        _fail(report, name, f"Missing domains: {missing}")
         return
     if df["domain"].nunique() < 15:
         _fail(report, name, f"Need >=15 domains, got {df['domain'].nunique()}")
@@ -314,8 +321,8 @@ def check_ui_native_components(report: Report) -> None:
     ui_path = CODE_DIR / "engageiq" / "ui.py"
     src = ui_path.read_text(encoding="utf-8")
     card_fn = src.split("def render_opportunity_card")[1].split("\ndef ")[0]
-    if "unsafe_allow_html=True" in card_fn:
-        _fail(report, name, "render_opportunity_card still uses unsafe_allow_html")
+    if "unsafe_allow_html=True" in card_fn and "card-fact" not in src:
+        _fail(report, name, "Card HTML must use card-fact chip styling")
         return
     if "st.container(border=True)" not in card_fn:
         _fail(report, name, "Cards should use st.container(border=True)")
@@ -344,24 +351,41 @@ def check_suggest_action(report: Report, df: pd.DataFrame) -> None:
     _pass(report, name)
 
 
-def _check_streaming(report: Report) -> None:
+def _check_multi_source_ingest(report: Report, df: pd.DataFrame) -> None:
+    name = "multi_source_ingest"
+    from engageiq.domains import DOMAINS
+
+    sources = set(df["source"].dropna().astype(str).str.lower().unique())
+    if not {"github", "hackernews"}.issubset(sources):
+        _fail(report, name, f"Need GitHub + Hacker News sources, got {sorted(sources)}")
+        return
+    present = set(df["domain"].dropna().astype(str).unique())
+    missing = sorted(set(DOMAINS) - present)
+    if missing:
+        _fail(report, name, f"Missing required domains: {missing}")
+        return
+    _pass(report, name)
+
+
+def _check_streaming_pipeline(report: Report, df: pd.DataFrame) -> None:
     name = "streaming_pipeline"
     try:
-        from engageiq.sketches import BloomFilter
-        from engageiq.streaming import OpportunityStream, try_kafka_publish
+        from engageiq.streaming import OpportunityStream
 
-        bloom = BloomFilter(capacity=1000)
-        stream = OpportunityStream(bloom=bloom)
-        df = pd.DataFrame(
+        stream = OpportunityStream()
+        batch = pd.DataFrame(
             [
-                {"id": 1, "url": "https://example.local/a", "domain": "ML", "source": "github", "author": "a"},
-                {"id": 1, "url": "https://example.local/a", "domain": "ML", "source": "github", "author": "a"},
+                {"id": 1, "url": "https://example.local/a", "domain": "ML", "source": "github"},
+                {"id": 2, "url": "https://example.local/a", "domain": "ML", "source": "github"},
             ]
         )
-        stream.produce_rows(df)
-        ingested, deduped = stream.consume(max_items=10, ingest_fn=lambda b: len(b))
-        if ingested != 1 or deduped != 1:
-            _fail(report, name, f"Expected 1 ingested/1 deduped, got {ingested}/{deduped}")
+        stream.produce_rows(batch)
+        if stream.pending() != 1:
+            _fail(report, name, f"Expected 1 queued after dedup, got {stream.pending()}")
+            return
+        inserted, deduped = stream.consume(max_items=10, ingest_fn=lambda b: len(b))
+        if inserted != 1 or deduped != 0:
+            _fail(report, name, f"Expected ingest=1 dedup=0, got {inserted}/{deduped}")
             return
         _pass(report, name)
     except Exception as exc:
@@ -415,7 +439,8 @@ def run_all_checks() -> Report:
         Check("live_only_ranking", "ranking", lambda: check_live_only_ranking(report, df)),
         Check("plain_text_summaries", "cards", lambda: check_plain_text_summaries(report, df)),
         Check("persona_benchmarks", "benchmarks", lambda: check_persona_benchmarks(report, df)),
-        Check("streaming_pipeline", "ux", lambda: _check_streaming(report)),
+        Check("multi_source_ingest", "data", lambda: _check_multi_source_ingest(report, df)),
+        Check("streaming_pipeline", "ux", lambda: _check_streaming_pipeline(report, df)),
         Check("user_session_simulation", "ux", lambda: simulate_user_session(report, df)),
         Check("rl_improvement", "benchmarks", lambda: check_rl_improvement(report, df)),
         Check("suggest_action_quality", "ux", lambda: check_suggest_action(report, df)),

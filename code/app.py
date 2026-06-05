@@ -10,16 +10,16 @@ import pandas as pd
 import streamlit as st
 
 from engageiq.analytics import compute_trends, compute_trends_from_df, compute_wow_domain_growth
-from engageiq.reinforcement_learning import EngagementRLAgent
 from engageiq.brief_export import BriefConfig, export_brief_csv, export_brief_pdf
 from engageiq.config import get_paths
 from engageiq.data import OpportunityStore
 from engageiq.data_utils import _safe_int, display_title, is_live_url, live_mask, ranking_corpus
+from engageiq.domains import DOMAINS
 from engageiq.embedding import build_index
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
-from engageiq.sketches import BloomFilter, CountMinSketch, HyperLogLog
-from engageiq.streaming import OpportunityStream, try_kafka_publish
-from engageiq.suggestions import generate_suggestion, openai_configured
+from engageiq.reinforcement_learning import EngagementRLAgent
+from engageiq.streaming import OpportunityStream
+from engageiq.suggestions import generate_suggestion, llm_configured, suggestion_provider
 from engageiq.ui import (
     Action,
     activity_counts,
@@ -100,7 +100,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 9}
+    return store, {"paths": paths, "version": 10}
 
 
 @st.cache_resource
@@ -135,8 +135,9 @@ def _suggest_action(row: pd.Series, interest: str) -> str:
     if "suggestion_cache" not in st.session_state:
         st.session_state.suggestion_cache = {}
     suggestion = generate_suggestion(row, interest, cache=st.session_state.suggestion_cache)
-    if openai_configured():
-        return f"[AI] {suggestion}"
+    provider = suggestion_provider()
+    if provider != "template":
+        return f"[AI · {provider.title()}] {suggestion}"
     return suggestion
 
 
@@ -212,39 +213,24 @@ def main() -> None:
     domains = sorted(df["domain"].dropna().unique().tolist())
     live_n = int(live_mask(df).sum())
     version = ctx["version"]
+    domain_count = df["domain"].nunique()
+    missing_domains = sorted(set(DOMAINS) - set(domains))
 
     if "user_state" not in st.session_state:
         st.session_state.user_state = _init_user_state(domains)
     user: UserState = st.session_state.user_state
     _apply_pending_feedback(user)
 
-    if "sketches" not in st.session_state or st.session_state.get("sketch_rows") != len(df):
-        st.session_state.sketches = {
-            "bloom": BloomFilter(capacity=max(25000, len(df)), fp_rate=0.01),
-            "cms_domain": CountMinSketch(width=4096, depth=5),
-            "cms_source": CountMinSketch(width=512, depth=5),
-            "hll_authors": HyperLogLog(p=12),
-        }
-        for _, r in df.iterrows():
-            st.session_state.sketches["bloom"].add(str(int(r["id"])))
-            st.session_state.sketches["cms_domain"].add(str(r["domain"]))
-            st.session_state.sketches["cms_source"].add(str(r["source"]))
-            st.session_state.sketches["hll_authors"].add(str(r["author"]))
-        st.session_state.sketch_rows = len(df)
-
     if "opportunity_stream" not in st.session_state:
-        st.session_state.opportunity_stream = OpportunityStream(bloom=st.session_state.sketches["bloom"])
+        st.session_state.opportunity_stream = OpportunityStream()
 
     counts = activity_counts()
 
     with st.sidebar:
-        st.markdown('<div class="sidebar-brand">EngageIQ</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="sidebar-tagline">Smart engagement opportunity scorer</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown("### EngageIQ")
+        st.caption("Recommendation + reinforcement learning")
         st.markdown("---")
-        st.markdown("**Your session**")
+        st.markdown("**Session**")
         m1, m2 = st.columns(2)
         m1.metric("Engaged", counts["engaged"])
         m2.metric("Saved", counts["bookmarked"])
@@ -259,99 +245,81 @@ def main() -> None:
             st.rerun()
 
         st.markdown("---")
-        st.markdown("**Test persona**")
-        persona = st.selectbox("Profile preset", options=list(PERSONAS.keys()), label_visibility="collapsed")
+        st.markdown("**Interest profile**")
+        persona = st.selectbox("Persona preset", options=list(PERSONAS.keys()), label_visibility="collapsed")
         if st.button("Load persona", use_container_width=True):
             user.interest_text = PERSONAS[persona]
             st.rerun()
 
         user.interest_text = st.text_area(
-            "Interest profile",
+            "Describe what you want to engage with",
             value=user.interest_text,
             height=120,
-            help="Used for embedding retrieval and ranking personalization.",
+            label_visibility="collapsed",
         )
 
         live_only = st.toggle(
-            "Show live API opportunities only",
+            "Live API opportunities only",
             value=True,
-            help="When on, rankings use real GitHub/HN URLs. Turn off to include offline backup records.",
+            help="Rank real GitHub and Hacker News URLs. Turn off to include offline backup rows.",
         )
-        english_only = st.toggle(
-            "English only",
-            value=True,
-            help="Hide opportunities whose title and description appear to be non-English.",
-        )
-
-        st.markdown("**Reinforcement learning**")
-        render_rl_policy(user.rl_agent)
+        english_only = st.toggle("English only", value=True)
 
         st.markdown("---")
         st.markdown("**Streaming pipeline**")
         stream: OpportunityStream = st.session_state.opportunity_stream
-        use_kafka = st.checkbox("Try Kafka publish (localhost:9092)", value=False)
-        batch_size = st.slider("Stream batch size", 50, 2000, 500, 50)
+        batch_size = st.slider("Batch size", 50, 1000, 300, 50)
         c_prod, c_cons = st.columns(2)
-        if c_prod.button("1 · Produce batch", use_container_width=True):
+        if c_prod.button("Produce batch", use_container_width=True):
             snapshot = pd.read_csv(paths.snapshot_csv)
             max_id = store.max_id()
             batch = snapshot[snapshot["id"] > max_id].head(int(batch_size)).copy()
             if batch.empty:
                 batch = snapshot.sample(n=min(int(batch_size), len(snapshot)), random_state=42)
             n = stream.produce_rows(batch)
-            if use_kafka:
-                sent = try_kafka_publish(batch.to_dict(orient="records"))
-                stream.metrics.kafka_sent += sent
-                if sent:
-                    st.caption(f"Kafka: published {sent} records to engageiq.opportunities")
             st.success(f"Queued {n} records ({stream.pending()} pending)")
-        if c_cons.button("2 · Consume (dedup → store)", use_container_width=True):
-            def _ingest(batch: pd.DataFrame) -> int:
-                return store.ingest_batch(batch)
-
-            def _sketch_hook(batch: pd.DataFrame) -> None:
-                for _, r in batch.iterrows():
-                    st.session_state.sketches["cms_domain"].add(str(r["domain"]))
-                    st.session_state.sketches["cms_source"].add(str(r["source"]))
-                    st.session_state.sketches["hll_authors"].add(str(r["author"]))
-
-            inserted, deduped = stream.consume(
-                max_items=int(batch_size),
-                ingest_fn=_ingest,
-                sketch_hooks=[_sketch_hook],
-            )
+        if c_cons.button("Consume → store", use_container_width=True):
+            inserted, deduped = stream.consume(max_items=int(batch_size), ingest_fn=store.ingest_batch)
             st.cache_resource.clear()
             st.success(f"Ingested {inserted} · dedup skipped {deduped}")
             st.rerun()
-
         sm = stream.metrics.to_dict()
         st.caption(
-            f"Stream: produced {sm['produced']:,} · ingested {sm['ingested']:,} · "
-            f"deduped {sm['deduped']:,} · queue {stream.pending():,}"
+            f"Produced {sm['produced']:,} · ingested {sm['ingested']:,} · deduped {sm['deduped']:,} · "
+            f"queue {stream.pending():,}"
         )
 
-        st.markdown("**Sketch metrics**")
-        st.caption(
-            f"Ingested: {len(df):,} · Live: {live_n:,} · "
-            f"Unique authors (HLL): {int(st.session_state.sketches['hll_authors'].count()):,}"
-        )
+        st.markdown("---")
+        st.markdown("**RL policy (Thompson sampling)**")
+        render_rl_policy(user.rl_agent)
+        st.caption("Engage, bookmark, or skip cards to update domain preferences.")
+        if llm_configured():
+            st.caption("LLM suggestions: Gemini → Groq → OpenAI (first configured free provider wins).")
+        else:
+            st.caption(
+                "Suggestions use smart templates (free). Optional: add a free GEMINI_API_KEY from "
+                "aistudio.google.com — no payment required."
+            )
 
     render_hero(
         title="EngageIQ — Engagement Opportunity Scorer",
         subtitle=(
-            f"{len(df):,} opportunities in store · {live_n:,} from live GitHub & Hacker News APIs · "
-            "Kafka-ready streaming · Bloom dedup · Embeddings + ANN · RL bandit"
+            f"{len(df):,} opportunities · {live_n:,} live GitHub & Hacker News · "
+            f"{domain_count} domains · TF-IDF retrieval + multi-stage ranking + RL bandit"
         ),
         stats={
             "Dataset": f"{len(df):,}",
             "Live API": f"{live_n:,}",
-            "Domains": str(df["domain"].nunique()),
+            "Domains": f"{domain_count}/15",
             "Saved": str(counts["bookmarked"]),
         },
     )
 
-    tab_discover, tab_bookmarks, tab_activity, tab_rl, tab_analytics = st.tabs(
-        ["🔍 Discover", "★ Bookmarks", "📋 Activity Log", "🧠 RL Policy", "📈 Analytics"]
+    if missing_domains:
+        st.warning(f"Dataset missing domains: {', '.join(missing_domains)}")
+
+    tab_discover, tab_bookmarks, tab_activity, tab_analytics = st.tabs(
+        ["Discover", "Bookmarks", "Activity", "Analytics"]
     )
 
     ranked = _rank_opportunities(df, user, user.interest_text, version, live_only, english_only)
@@ -365,26 +333,15 @@ def main() -> None:
     live_in_results = int(live_mask(ranked).sum())
 
     with tab_discover:
-        c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-        c1.markdown(f"**Personalized opportunities** for `{persona.split('(')[0].strip()}`")
+        c1, c2, c3 = st.columns([2, 1, 1])
+        c1.markdown(f"**Top opportunities** for `{persona.split('(')[0].strip()}`")
         c2.metric("NDCG@10", f"{ndcg_val:.3f}")
         c3.metric("Live in top-20", live_in_results)
-        showing = []
-        if live_only:
-            showing.append("Live only")
-        else:
-            showing.append("All data")
-        if english_only:
-            showing.append("English")
-        c4.metric("Showing", " · ".join(showing))
 
         if live_only and live_n == 0:
-            st.warning("No live API rows loaded. Data file missing on server — check code/data/live_opportunities.csv.")
+            st.warning("No live API rows loaded. Check code/data/live_opportunities.csv on the server.")
         elif live_only:
-            st.caption(
-                "Real GitHub repos and Hacker News threads. Summaries are plain text; "
-                "toggle off English only in the sidebar to include other languages."
-            )
+            st.caption("Ranked with embedding retrieval, multi-stage scoring, and RL domain boosts from your feedback.")
 
         for i, row in ranked.iterrows():
             render_opportunity_card(
@@ -397,11 +354,10 @@ def main() -> None:
 
     with tab_bookmarks:
         st.markdown("#### Saved opportunities")
-        st.caption("Bookmarks and engagements persist for your session.")
         render_bookmarks_list()
 
     with tab_activity:
-        st.markdown("#### Engagement activity log")
+        st.markdown("#### Activity log")
         filter_opt = st.radio(
             "Filter",
             ["All", "Engage", "Bookmark", "Skip", "Unbookmark"],
@@ -417,40 +373,10 @@ def main() -> None:
                 mime="text/csv",
             )
 
-    with tab_rl:
-        st.markdown("#### Reinforcement learning from feedback")
-        st.caption(
-            "EngageIQ uses a **contextual multi-armed bandit** (Thompson sampling) to learn which domains "
-            "you prefer. Actions: engage (+1.0), bookmark (+0.85), skip (0.0)."
-        )
-        render_rl_policy(user.rl_agent)
-
-        if user.rl_agent.reward_history:
-            hist = pd.DataFrame(user.rl_agent.reward_history)
-            st.markdown("**Reward history (this session)**")
-            cum_chart = (
-                alt.Chart(hist)
-                .mark_line(point=True, color="#10B981")
-                .encode(x="round:Q", y="cumulative_reward:Q", tooltip=["round", "reward", "arm"])
-                .properties(height=240)
-            )
-            st.altair_chart(cum_chart, use_container_width=True)
-
-        from engageiq.persona_eval import learning_benchmark
-
-        st.markdown("**60-round benchmark (RL vs random domain exploration)**")
-        if st.button("Run RL benchmark", use_container_width=True, key="rl_bench_tab"):
-            lb = learning_benchmark(df, user.interest_text, rounds=60)
-            st.session_state._last_rl_bench = lb
-        if st.session_state.get("_last_rl_bench"):
-            lb = st.session_state._last_rl_bench
-            r1, r2, r3, r4 = st.columns(4)
-            r1.metric("Reward w/ RL (last 10)", f"{lb['avg_reward_last10_with_rl']:.2f}")
-            r2.metric("Reward w/o RL (last 10)", f"{lb['avg_reward_last10_without_rl']:.2f}")
-            r3.metric("Session gain", f"{lb.get('session_reward_gain', lb['reward_improvement_last10']):+.2f}")
-            r4.metric("NDCG improvement", f"{lb['improvement']:+.3f}")
-
     with tab_analytics:
+        st.markdown("#### Batch analytics & export")
+        st.caption("Capability coverage: multi-source ingest, retrieval, ranking, RL, analytics, dashboard export.")
+
         try:
             trends = compute_trends(str(paths.duckdb_path), days=30)
         except Exception:
@@ -460,7 +386,7 @@ def main() -> None:
         col_a, col_b = st.columns(2)
 
         with col_a:
-            st.markdown("**Opportunity volume by domain (30d)**")
+            st.markdown("**Volume by domain (30d)**")
             dom_chart = _chart(
                 trends.by_domain,
                 lambda c: c.mark_bar(color="#4F46E5"),
@@ -473,7 +399,7 @@ def main() -> None:
             st.altair_chart(dom_chart, use_container_width=True)
 
         with col_b:
-            st.markdown("**Daily ingestion volume**")
+            st.markdown("**Daily volume**")
             vol_chart = _chart(
                 trends.volume_over_time,
                 lambda c: c.mark_line(point=True, color="#4F46E5", strokeWidth=2),
@@ -494,8 +420,22 @@ def main() -> None:
         st.altair_chart(wow_chart, use_container_width=True)
 
         st.markdown("---")
-        st.markdown("**Export weekly brief**")
-        ex1, ex2, ex3 = st.columns(3)
+        st.markdown("**RL benchmark (60 rounds vs no-RL baseline)**")
+        if st.button("Run RL benchmark", use_container_width=True, key="rl_bench"):
+            from engageiq.persona_eval import learning_benchmark
+
+            st.session_state._last_rl_bench = learning_benchmark(df, user.interest_text, rounds=60)
+        if st.session_state.get("_last_rl_bench"):
+            lb = st.session_state._last_rl_bench
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Reward w/ RL (last 10)", f"{lb['avg_reward_last10_with_rl']:.2f}")
+            r2.metric("Reward w/o RL (last 10)", f"{lb['avg_reward_last10_without_rl']:.2f}")
+            r3.metric("Session gain", f"{lb.get('session_reward_gain', lb['reward_improvement_last10']):+.2f}")
+            r4.metric("NDCG improvement", f"{lb['improvement']:+.3f}")
+
+        st.markdown("---")
+        st.markdown("**Brief export**")
+        ex1, ex2 = st.columns(2)
         if ex1.button("Export CSV brief", use_container_width=True):
             out = export_brief_csv(
                 ranked_df=ranked,
@@ -514,21 +454,6 @@ def main() -> None:
                 rising_df=wow,
             )
             st.success(f"Exported: {out.name}")
-
-        st.markdown("**RL simulation benchmark (60 rounds · Thompson sampling vs no-RL)**")
-        if ex3.button("Run RL simulation", use_container_width=True):
-            from engageiq.persona_eval import learning_benchmark
-
-            lb = learning_benchmark(df, user.interest_text, rounds=60)
-            r1, r2, r3, r4 = st.columns(4)
-            r1.metric("NDCG w/ RL (last 10)", f"{lb['ndcg@10_last10_avg']:.3f}")
-            r2.metric("NDCG w/o RL (last 10)", f"{lb['ndcg@10_without_rl_last10']:.3f}")
-            r3.metric("Reward Δ (last 10)", f"{lb['reward_improvement_last10']:+.3f}")
-            r4.metric("Cumulative reward", f"{lb['cumulative_reward_with_rl']:.0f}")
-            st.caption(
-                f"Policy: {lb['policy']} · formulation: {lb['rl_formulation']} · "
-                f"entropy={lb['policy_entropy']:.2f}"
-            )
 
 
 if __name__ == "__main__":

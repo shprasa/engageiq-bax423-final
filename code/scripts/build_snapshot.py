@@ -13,7 +13,8 @@ if str(CODE_DIR) not in sys.path:
 from engageiq.config import get_paths
 from engageiq.scrape_github import scrape_github
 from engageiq.scrape_hn import scrape_hackernews
-from engageiq.scrape_reddit import scrape_reddit
+
+SOURCES = ("github", "hackernews")
 
 
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
@@ -62,15 +63,6 @@ def build_snapshot(
     print(f"  GitHub rows: {len(gh_df)}")
     parts.append(gh_df)
 
-    print("Scraping Reddit (optional)...")
-    rd_df = _normalize(scrape_reddit(per_sub_limit=50))
-    if not rd_df.empty:
-        rd_df["data_origin"] = "live"
-        print(f"  Reddit rows: {len(rd_df)}")
-        parts.append(rd_df)
-    else:
-        print("  Reddit rows: 0 (skipped — no creds)")
-
     live_df = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     if not live_df.empty:
         live_df = live_df.drop_duplicates(subset=["url"], keep="first")
@@ -78,6 +70,7 @@ def build_snapshot(
     synthetic_df = pd.DataFrame()
     if synthetic_csv and synthetic_csv.exists():
         synthetic_df = _normalize(pd.read_csv(synthetic_csv))
+        synthetic_df = synthetic_df[synthetic_df["source"].isin(SOURCES)]
         synthetic_df["data_origin"] = "synthetic"
         print(f"Synthetic backup rows: {len(synthetic_df)}")
 
@@ -113,7 +106,17 @@ def main() -> None:
     parser.add_argument("--synthetic", type=str, default="", help="Synthetic CSV to merge")
     parser.add_argument("--github-per-domain", type=int, default=100)
     parser.add_argument("--hn-max", type=int, default=2000)
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Quick scrape: hn-max=400, github-per-domain=30 (~5-10 min)",
+    )
     args = parser.parse_args()
+
+    if args.fast:
+        args.hn_max = 400
+        args.github_per_domain = 30
+        print("FAST MODE: smaller live sample + synthetic merge to 10k", flush=True)
 
     paths = get_paths()
     out = Path(args.out) if args.out else paths.snapshot_csv

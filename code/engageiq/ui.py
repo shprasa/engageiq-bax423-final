@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -17,7 +18,7 @@ from engageiq.data_utils import (
     estimated_engagement_time,
     escape_markdown,
     is_live_url,
-    opportunity_type_label,
+    short_source_label,
 )
 
 Action = Literal["engage", "bookmark", "skip", "unbookmark"]
@@ -234,6 +235,101 @@ html, body, [class*="css"] {{
 
 .score-pill strong {{
     color: {BRAND["primary"]};
+}}
+
+.card-facts {{
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.45rem;
+    margin: 0.4rem 0 0.55rem 0;
+}}
+
+.card-fact {{
+    background: #F8FAFC;
+    border: 1px solid {BRAND["border"]};
+    border-radius: 8px;
+    padding: 0.32rem 0.42rem;
+    min-width: 0;
+    overflow: hidden;
+}}
+
+.card-fact-label {{
+    font-size: 0.62rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: {BRAND["muted"]};
+    line-height: 1.15;
+    margin: 0;
+}}
+
+.card-fact-value {{
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: #0F172A;
+    line-height: 1.2;
+    margin: 0.12rem 0 0 0;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}}
+
+/* Force compact typography inside bordered opportunity cards */
+div[data-testid="stVerticalBlockBorderWrapper"] h3 {{
+    font-size: 0.95rem !important;
+    line-height: 1.25 !important;
+    margin-bottom: 0.25rem !important;
+}}
+
+div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCaptionContainer"] p {{
+    font-size: 0.72rem !important;
+}}
+
+div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] p {{
+    font-size: 0.82rem !important;
+    line-height: 1.4 !important;
+}}
+
+div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetric"] {{
+    background: #F8FAFC;
+    border: 1px solid {BRAND["border"]};
+    border-radius: 8px;
+    padding: 0.25rem 0.35rem;
+}}
+
+div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetricLabel"] p {{
+    font-size: 0.62rem !important;
+    text-transform: uppercase;
+}}
+
+div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetricValue"] {{
+    font-size: 0.78rem !important;
+}}
+
+div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMetricValue"] div {{
+    font-size: 0.78rem !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}}
+
+.opp-card-title {{
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    line-height: 1.3 !important;
+    margin: 0 0 0.25rem 0 !important;
+}}
+
+.opp-card-meta {{
+    font-size: 0.78rem;
+    color: {BRAND["muted"]};
+    margin: 0 0 0.35rem 0;
+    line-height: 1.35;
+}}
+
+.opp-card-summary {{
+    font-size: 0.84rem;
+    line-height: 1.45;
+    color: #334155;
+    margin: 0 0 0.35rem 0;
 }}
 
 .suggest-box {{
@@ -481,6 +577,45 @@ def _source_label(source: str) -> str:
     )
 
 
+def _format_fact_value(value: str, *, max_len: int = 14) -> str:
+    display_val = str(value).strip() if value is not None else ""
+    if display_val.lower() in ("nan", "none", ""):
+        display_val = "—"
+    elif len(display_val) > max_len:
+        display_val = display_val[: max_len - 1] + "…"
+    return display_val
+
+
+def _render_fact_strip(facts: list[tuple[str, str]], *, columns: int = 4, max_len: int = 14) -> None:
+    """Compact fact chips — inline styles so Streamlit cannot override font size."""
+    n = min(columns, max(1, len(facts)))
+    label_style = (
+        "font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;"
+        "color:#64748B;line-height:1.1;margin:0;"
+    )
+    value_style = (
+        "font-size:11px;font-weight:600;color:#0F172A;line-height:1.15;margin:2px 0 0 0;"
+        "word-break:break-word;overflow-wrap:anywhere;"
+    )
+    cell_style = (
+        "background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;"
+        "padding:4px 6px;min-width:0;overflow:hidden;"
+    )
+    grid_style = f"display:grid;grid-template-columns:repeat({n},minmax(0,1fr));gap:6px;margin:6px 0 8px 0;"
+    cells: list[str] = []
+    for label, value in facts[:n]:
+        lab = html.escape(str(label))
+        val = html.escape(_format_fact_value(value, max_len=max_len))
+        cells.append(
+            f'<div class="card-fact" style="{cell_style}">'
+            f'<div class="card-fact-label" style="{label_style}">{lab}</div>'
+            f'<div class="card-fact-value" style="{value_style}">{val}</div>'
+            f"</div>"
+        )
+    block = f'<div class="card-facts" style="{grid_style}">{"".join(cells)}</div>'
+    st.markdown(block, unsafe_allow_html=True)
+
+
 def render_opportunity_card(
     rank: int,
     row: pd.Series,
@@ -496,27 +631,41 @@ def render_opportunity_card(
     headline = display_title(row)
     subtitle = display_subtitle(row)
     summary = display_summary(row)
-    type_label = opportunity_type_label(row)
+    type_label = short_source_label(row)
     est_time = estimated_engagement_time(row)
     facts = decision_facts(row)
 
     with st.container(border=True):
-        header = f"### #{rank} · {escape_markdown(headline)}"
-        if bookmarked:
-            header += " · :orange[★ Saved]"
-        st.markdown(header)
+        title = html.escape(headline)
+        saved = ' <span style="color:#D97706;font-size:12px;">★ Saved</span>' if bookmarked else ""
+        st.markdown(
+            f'<p style="font-size:15px;font-weight:700;margin:0 0 4px 0;line-height:1.25;color:#0F172A;">'
+            f"#{rank} · {title}{saved}</p>",
+            unsafe_allow_html=True,
+        )
 
-        origin = ":green[Live API]" if is_live_url(url) else ":gray[Offline backup]"
-        st.markdown(f"{origin} · **{type_label}** · **{row['domain']}**")
+        origin_html = (
+            '<span style="color:#166534;font-weight:600;">Live API</span>'
+            if is_live_url(url)
+            else '<span style="color:#64748B;">Offline backup</span>'
+        )
+        domain = html.escape(str(row.get("domain") or ""))
+        meta = (
+            f'<div style="font-size:11px;color:#64748B;margin:0 0 6px 0;line-height:1.35;">'
+            f"{origin_html} · <strong>{html.escape(type_label)}</strong> · "
+            f"<strong>{domain}</strong></div>"
+        )
+        st.markdown(meta, unsafe_allow_html=True)
         if subtitle:
             st.caption(subtitle)
 
-        st.write(summary)
+        st.markdown(
+            f'<p style="font-size:12px;line-height:1.45;color:#334155;margin:0 0 6px 0;">'
+            f"{html.escape(summary)}</p>",
+            unsafe_allow_html=True,
+        )
 
-        fact_cols = st.columns(min(4, max(1, len(facts))))
-        for i, (label, value) in enumerate(facts[:4]):
-            display_val = "—" if str(value).lower() in ("nan", "none", "") else value
-            fact_cols[i].metric(label, display_val)
+        _render_fact_strip(facts, columns=4, max_len=12)
 
         if len(facts) > 4:
             with st.expander("More details"):
@@ -531,19 +680,34 @@ def render_opportunity_card(
             else:
                 st.caption(url)
         with c_time:
-            st.metric("Est. time", est_time.split(" (")[0].replace("< ", "<"))
+            _render_fact_strip(
+                [("Est. time", est_time.split(" (")[0].replace("< ", "<"))],
+                columns=1,
+                max_len=12,
+            )
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Relevance", f"{float(row.get('score_relevance', 0)):.2f}")
-        m2.metric("Health", f"{float(row.get('score_health', 0)):.2f}")
-        m3.metric("Visibility", f"{float(row.get('score_visibility', 0)):.2f}")
-        m4.metric("Effort", f"{float(row.get('score_effort', 0)):.2f}")
+        score_facts = [
+            ("Relevance", f"{float(row.get('score_relevance', 0)):.2f}"),
+            ("Health", f"{float(row.get('score_health', 0)):.2f}"),
+            ("Visibility", f"{float(row.get('score_visibility', 0)):.2f}"),
+            ("Effort", f"{float(row.get('score_effort', 0)):.2f}"),
+        ]
+        _render_fact_strip(score_facts, columns=4, max_len=8)
 
         if str(row.get("source", "")) == "github" and _safe_int(row.get("good_first_issue")) == 1:
-            st.success("Good first issue — beginner-friendly, typically < 1 hour to start")
+            st.caption("Good first issue — beginner-friendly, typically < 1 hour to start")
 
-        st.markdown(f"**Why ranked here:** {explain}")
-        st.info(f"**Suggested action:** {suggest}")
+        st.markdown(
+            f'<p style="font-size:11px;margin:0.35rem 0;line-height:1.4;">'
+            f"<strong>Why ranked here:</strong> {html.escape(explain)}</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<p style="font-size:11px;margin:0.35rem 0;padding:0.45rem 0.55rem;'
+            f'background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;line-height:1.4;color:#0C4A6E;">'
+            f"<strong>Suggested action:</strong> {html.escape(suggest)}</p>",
+            unsafe_allow_html=True,
+        )
 
         if show_actions:
             st.caption(f"Estimated engagement: {est_time}")

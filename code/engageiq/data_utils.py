@@ -101,11 +101,13 @@ def _clean_lang(value) -> str:
     return lang
 
 
-def format_created(value) -> str:
+def format_created(value, *, compact: bool = False) -> str:
     try:
         ts = pd.to_datetime(value, errors="coerce")
         if pd.isna(ts):
             return "—"
+        if compact:
+            return ts.strftime("%b %d, '%y")
         return ts.strftime("%b %d, %Y")
     except Exception:
         return "—"
@@ -153,6 +155,28 @@ def opportunity_type_label(row: pd.Series) -> str:
             return "Hacker News Discussion"
         return "Hacker News Story"
     return "Engagement Opportunity"
+
+
+def short_source_label(row: pd.Series) -> str:
+    """Compact source label for card fact chips."""
+    src = str(row.get("source", "")).lower()
+    if src == "github":
+        if _is_github_issue(row):
+            return "GitHub GFI" if _safe_int(row.get("good_first_issue")) == 1 else "GitHub issue"
+        return "GitHub repo"
+    if src == "hackernews":
+        url = str(row.get("url") or "")
+        return "HN thread" if "news.ycombinator.com/item" in url else "HN story"
+    return "Opportunity"
+
+
+def _truncate_text(text: str, max_len: int = 18) -> str:
+    s = str(text or "").strip()
+    if not s or s.lower() in ("nan", "none"):
+        return "—"
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
 
 
 def display_title(row: pd.Series) -> str:
@@ -248,11 +272,11 @@ def display_summary(row: pd.Series) -> str:
 
 
 def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
-    """Key-value facts for the decision panel."""
+    """Key-value facts for the decision panel (compact values for card layout)."""
     facts: list[tuple[str, str]] = [
-        ("Source", opportunity_type_label(row)),
-        ("Domain", str(row.get("domain") or "—")),
-        ("Posted", format_created(row.get("created_at"))),
+        ("Source", short_source_label(row)),
+        ("Domain", _truncate_text(str(row.get("domain") or "—"), 22)),
+        ("Posted", format_created(row.get("created_at"), compact=True)),
     ]
     src = str(row.get("source", "")).lower()
 
@@ -265,9 +289,10 @@ def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
             facts.append(("Open issues", f"{int(float(row['issues_open'])):,}"))
         lang = _clean_lang(row.get("lang"))
         if lang:
-            facts.append(("Language", lang))
-        if _safe_int(row.get("good_first_issue")) == 1:
-            facts.append(("Contribution", "Good first issue"))
+            facts.append(("Language", _truncate_text(lang, 16)))
+        is_gfi = _safe_int(row.get("good_first_issue")) == 1
+        if is_gfi and not _is_github_issue(row):
+            facts.append(("GFI", "Yes"))
     elif src == "hackernews":
         facts.append(("Points", f"{int(float(row.get('upvotes') or 0)):,}"))
         facts.append(("Comments", f"{int(float(row.get('comments') or 0)):,}"))

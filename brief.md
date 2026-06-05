@@ -1,37 +1,34 @@
 ## EngageIQ — Technical Brief (template)
 
-Use this template to produce `brief.pdf` (≤4 pages) as required.
-
 ### 1) Live URL + Repo
-- Live deployment URL: \<fill\>
-- Source repo: \<fill\>
+- Live deployment URL: https://engageiq-bax423-final.streamlit.app/
+- Source repo: https://github.com/shprasa/engageiq-bax423-final
 
 ### 2) Architecture
-- **Ingestion**: offline snapshot `data/opportunities_snapshot.csv` + simulated streaming batches in the UI.
-- **Storage**: DuckDB (`data/engageiq.duckdb`) with `opportunities` table.
-- **Streaming sketches (BAX-423 technique #1)**: Bloom filter for dedup, Count-Min Sketch for trend counts, HyperLogLog for approx uniques.
-- **Embedding retrieval (BAX-423 technique #2)**: TF‑IDF + SVD embeddings + ANN search (NearestNeighbors cosine).
-- **Ranking**: multi-stage candidate generation → scoring → rerank with component scores and “Why this?”.
-- **Adaptive learning**: Thompson-sampling bandit over domains + benchmarked improvement over 50+ rounds.
-- **Analytics**: DuckDB batch queries for trends and time-series volume; charts in Streamlit.
+- **Ingestion**: GitHub + Hacker News snapshot → URL dedup → DuckDB.
+- **Recommendation (technique #1)**: TF‑IDF + SVD embeddings + ANN search → multi-stage ranking + NDCG@10.
+- **Reinforcement learning (technique #2)**: Thompson-sampling bandit over domains; rewards from engage/bookmark/skip.
+- **Analytics**: DuckDB batch queries for trends; charts in Streamlit.
+- **Export**: CSV/PDF weekly brief from ranked results + trends.
 
 ### 3) Pipeline diagram (high level)
-Snapshot/Streaming → Dedup (Bloom) → Store (DuckDB) → Embed+ANN → Score+Rank → Feedback → Bandit Update → Dashboard + Brief Export
+Snapshot → Dedup → DuckDB → Embed+ANN → Score+Rank → Feedback → Bandit Update → Dashboard + Brief Export
 
-### 4) Test personas (pass/fail table)
-Fill a table covering each of the 6 core capabilities for:
-- Sofia (ML student)
-- David (DevOps)
-- Lina (data journalist)
-- Raj (startup founder)
+### 4) Six core capabilities
+1. Multi-source ingest + dedup  
+2. Embeddings + ANN retrieval  
+3. Scoring + multi-stage ranking  
+4. Adaptive learning / RL (50+ rounds)  
+5. Batch analytics + trends  
+6. Dashboard + brief export  
 
-### 5) Benchmark results
-- Retrieval/ranking metric: NDCG@10 (reported in app; proxy label).
-- Learning benchmark: first-10 vs last-10 NDCG@10 (simulated 60 rounds).
-- Technique impact: compare without bandit vs with bandit (include your numbers).
+### 5) Test personas
+Sofia, David, Lina, Raj — pass/fail table in `brief.pdf`.
 
-### 6) Limitations + next steps
-- Replace synthetic snapshot with real GitHub/Reddit/HN ingestion.
-- Upgrade embeddings (SentenceTransformers) and ANN (FAISS).
-- Replace proxy labels with real relevance judgments or click logs.
+### 6) Benchmark results
+- NDCG@10 per persona
+- 60-round RL vs no-RL baseline
 
+### 7) Limitations
+- Synthetic backup rows pad dataset to 10k for offline grading.
+- TF-IDF/SVD instead of SentenceTransformers/FAISS for deploy reliability.

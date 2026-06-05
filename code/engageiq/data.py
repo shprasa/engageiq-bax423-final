@@ -219,7 +219,8 @@ class OpportunityStore:
                     """
                     INSERT INTO opportunities
                     SELECT * FROM batch_df
-                    WHERE id NOT IN (SELECT id FROM opportunities);
+                    WHERE id NOT IN (SELECT id FROM opportunities)
+                      AND url NOT IN (SELECT url FROM opportunities);
                     """
                 )
                 after = int(con.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0])

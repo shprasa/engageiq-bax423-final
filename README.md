@@ -18,7 +18,7 @@ py -m pip install -r requirements.txt
 py -m streamlit run app.py
 ```
 
-Offline dataset: `data/opportunities_snapshot.csv` (≥10,000 records, 15 domains).
+Offline dataset: `data/opportunities_snapshot.csv` (≥10,000 records, **15 domains**).
 
 Optional live rebuild (requires `code/.env` with `GITHUB_TOKEN`):
 
@@ -32,24 +32,28 @@ py scripts/build_snapshot.py
 | Path | Description |
 |------|-------------|
 | `code/` | Application source + `requirements.txt` |
-| `data/` | Offline snapshot CSV + DuckDB (generated at runtime) |
+| `data/` | Offline snapshot CSV + benchmark results |
 | `brief.pdf` | Technical brief (≤4 pages) |
 | `prompts.md` | AI prompt iteration log |
 
-## BAX-423 techniques
+## BAX-423 techniques (2 implemented)
 
-1. **Sketching** — Bloom filter, Count-Min Sketch, HyperLogLog  
-2. **Embeddings + ANN** — TF-IDF/SVD + cosine NearestNeighbors  
-3. **Adaptive learning** — Thompson sampling bandit from user feedback  
-4. **Batch analytics** — DuckDB trend queries  
-5. **Streaming (optional)** — Kafka scripts in `code/infra/kafka/`
+1. **Recommendation system** — TF-IDF/SVD embeddings, ANN retrieval, multi-stage ranking, NDCG@10
+2. **Reinforcement learning** — Thompson-sampling contextual bandit from engage/bookmark/skip feedback
+
+## Six core capabilities
+
+1. Multi-source ingest + dedup (GitHub + Hacker News → DuckDB)
+2. Embeddings + ANN retrieval
+3. Multi-stage ranking + NDCG@10
+4. Adaptive learning / RL (50+ rounds)
+5. Batch analytics + trends
+6. Dashboard + brief export
 
 ## Scripts
 
 ```bash
-py scripts/build_snapshot.py      # live + synthetic merge
-py scripts/run_benchmarks.py      # persona + learning metrics → data/benchmark_results.json
+py scripts/run_benchmarks.py      # persona + RL metrics → data/benchmark_results.json
 py scripts/generate_brief.py      # brief.pdf
+py scripts/user_test_loop.py      # rubric validation
 ```
-
-See `DEPLOY.md` for Streamlit Cloud setup.

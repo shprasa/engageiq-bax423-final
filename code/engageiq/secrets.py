@@ -21,6 +21,15 @@ def require_github_token() -> str:
     return token
 
 
+def llm_configured() -> bool:
+    load_env()
+    return bool(
+        os.getenv("GEMINI_API_KEY", "").strip()
+        or os.getenv("GROQ_API_KEY", "").strip()
+        or os.getenv("OPENAI_API_KEY", "").strip()
+    )
+
+
 def openai_configured() -> bool:
     load_env()
     return bool(os.getenv("OPENAI_API_KEY", "").strip())

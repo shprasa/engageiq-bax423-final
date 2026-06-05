@@ -1,63 +1,49 @@
-# EngageIQ — Rubric Compliance Checklist (Final)
+# EngageIQ — Rubric Checklist (Final)
 
 **Student:** Shivneel Prasad  
 **Live URL:** https://engageiq-bax423-final.streamlit.app/  
-**Repo:** https://github.com/shprasa/engageiq-bax423-final  
-**ZIP:** `C:\Users\prasa\OneDrive\Desktop\Prasad_Shivneel_BAX423_Final.zip`
+**Full audit:** See `RUBRIC_COMPLIANCE.md` (cross-checked against official one-pager + EngageIQ brief)
 
-## Submission package
+## Critical rules
 
-| Item | Required | Status |
-|------|----------|--------|
-| `code/` + `requirements.txt` + README | Yes | Done |
-| Single-command run | Yes | `cd code && py -m streamlit run app.py` |
-| `data/` snapshot >=10,000 | Yes | 10,000 rows (GitHub + HN only) |
-| `brief.pdf` <=4 pages | Yes | Regenerated with live stats |
-| `prompts.md` | Yes | Done |
-| Live public URL | Yes | Streamlit Cloud |
+- [x] All **6 core capabilities** present (missing any caps at 60/100)
+- [x] **2 BAX-423 techniques** integrated and benchmarked (Recommendation + RL)
+- [x] Code runs with single command
+- [ ] Live URL verified after latest redeploy (user)
 
-## Live data (fixed for cloud deploy)
+## 6 core capabilities — required items
+
+| # | Capability | Required (from brief) | Status |
+|---|------------|----------------------|--------|
+| 1 | Multi-source ingest + **streaming** + dedup | ≥2 sources; stream pipeline; dedup; structured store; 10k rows / 15 domains | ✅ |
+| 2 | Embeddings + ANN retrieval | Dense embeddings + nearest-neighbor retrieval | ✅ |
+| 3 | Multi-stage ranking + metric | Composite scores; candidate→score→rerank; NDCG@10 | ✅ |
+| 4 | Adaptive learning / RL | Feedback loop; **50+ rounds**; measurable improvement | ✅ |
+| 5 | Batch analytics + trends | Batch queries; trends; volume; domain breakdown | ✅ |
+| 6 | Dashboard + brief export | Ranked list; Why this?; **suggested actions**; feedback; trends; PDF/CSV | ✅ |
+
+\* Capability 6 LLM: use free **Gemini** or **Groq** API key (see `.env.example`). No payment required. Without any key, interest-aware templates still power suggestions.
+
+## Data
 
 | Item | Status |
 |------|--------|
-| Local CSV live rows | 1,964 (928 GitHub + 1,036 HN) |
-| Bundled `code/data/live_opportunities.csv` | 692 KB — deployed to GitHub |
-| Full snapshot on GitHub | `data/` + `code/data/` both updated |
-| App default | "Show live API opportunities only" ON |
+| 10,000 rows | ✅ |
+| 15/15 domains | ✅ |
+| GitHub + Hacker News sources | ✅ |
+| 1,964 live API rows | ✅ |
 
-**Why you saw 0 live:** GitHub had the old synthetic-only CSV; Streamlit Cloud never received the scraped data. Fixed by pushing live CSV + auto-reload logic.
+## Personas (all PASS on 6 capabilities)
 
-## 6 core capabilities
-
-| # | Capability | Status |
-|---|------------|--------|
-| 1 | Multi-source ingest + streaming + dedup | Done | Produce → consume queue + Bloom + optional Kafka |
-| 2 | Embeddings + ANN retrieval | Done |
-| 3 | Multi-stage ranking + NDCG@10 | Done |
-| 4 | Adaptive learning / RL (50+ rounds) | Done | +0.7 reward vs random baseline (60 rounds) |
-| 5 | Batch analytics + trends | Done |
-| 6 | Dashboard + brief export | Done |
-
-## UI features (production pass)
-
-| Feature | Status |
+| Persona | Status |
 |---------|--------|
-| Professional styling (hero, cards, badges) | Done |
-| Bookmarks tab | Done |
-| Activity log + CSV export | Done |
-| Real URLs + descriptions on cards | Done |
-| Source-specific titles + decision facts on cards | Done |
-| Suggested actions (LLM optional) | Done | OpenAI when `OPENAI_API_KEY` set; templates otherwise |
-| Streaming pipeline UI | Done | Sidebar: Produce batch → Consume (dedup → DuckDB) |
-| Automated user-test loop | Done — 14/14 checks |
-| Live vs offline backup badges | Done |
+| Sofia (ML / portfolio) | ✅ |
+| David (DevOps) | ✅ |
+| Lina (trend spotter) | ✅ |
+| Raj (startup / devtools) | ✅ |
 
-## Before Canvas upload (your actions)
+## Before Canvas + demo
 
-- [ ] Open live URL — confirm hero shows **1,964 Live API** (after Streamlit redeploy ~2 min)
-- [ ] Upload `Prasad_Shivneel_BAX423_Final.zip` to Canvas
-- [ ] Attend Saturday demo using `DEMO.md`
-
-## Redeploy note
-
-If Streamlit still shows old data: **Manage app → Reboot** or wait for auto-redeploy from GitHub push (completed).
+- [ ] Redeploy Streamlit — confirm compact card fonts on live app
+- [ ] Upload `Prasad_Shivneel_BAX423_Final.zip`
+- [ ] Saturday 10-min demo (`DEMO.md`)

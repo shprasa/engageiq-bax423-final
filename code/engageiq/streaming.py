@@ -1,121 +1,58 @@
-"""Streaming ingest: in-app queue + optional Kafka (localhost) with Bloom dedup."""
+"""Minimal batch streaming queue with URL dedup (capability 1)."""
 from __future__ import annotations
 
-import json
-from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Callable
 
 import pandas as pd
-
-from .sketches import BloomFilter
 
 
 @dataclass
 class StreamMetrics:
     produced: int = 0
-    deduped: int = 0
     ingested: int = 0
-    kafka_sent: int = 0
+    deduped: int = 0
 
     def to_dict(self) -> dict[str, int]:
-        return {
-            "produced": self.produced,
-            "deduped": self.deduped,
-            "ingested": self.ingested,
-            "kafka_sent": self.kafka_sent,
-        }
+        return {"produced": self.produced, "ingested": self.ingested, "deduped": self.deduped}
 
 
-@dataclass
 class OpportunityStream:
-    """Simulates a real-time stream (Kafka-compatible) with deduplication."""
+    """Simulated streaming pipeline: produce batches → dedup by URL → ingest."""
 
-    bloom: BloomFilter
-    url_bloom: BloomFilter | None = None
-    queue: deque[dict[str, Any]] = field(default_factory=deque)
-    metrics: StreamMetrics = field(default_factory=StreamMetrics)
+    def __init__(self) -> None:
+        self._queue: list[dict] = []
+        self._seen_urls: set[str] = set()
+        self.metrics = StreamMetrics()
 
-    def __post_init__(self) -> None:
-        if self.url_bloom is None:
-            self.url_bloom = BloomFilter(capacity=max(50000, getattr(self.bloom, "m", 25000)), fp_rate=0.01)
+    def pending(self) -> int:
+        return len(self._queue)
 
-    def produce_rows(self, df: pd.DataFrame) -> int:
-        n = 0
-        for _, row in df.iterrows():
-            self.queue.append(row.to_dict())
-            n += 1
-        self.metrics.produced += n
-        return n
-
-    def _is_duplicate(self, row: dict[str, Any]) -> bool:
-        rid = str(row.get("id", ""))
-        url = str(row.get("url", ""))
-        if rid and rid in self.bloom:
-            return True
-        if url and url in self.url_bloom:
-            return True
-        return False
-
-    def _mark_seen(self, row: dict[str, Any]) -> None:
-        rid = str(row.get("id", ""))
-        url = str(row.get("url", ""))
-        if rid:
-            self.bloom.add(rid)
-        if url:
-            self.url_bloom.add(url)
+    def produce_rows(self, batch_df: pd.DataFrame) -> int:
+        added = 0
+        for row in batch_df.to_dict(orient="records"):
+            url = str(row.get("url") or "")
+            if not url or url in self._seen_urls:
+                self.metrics.deduped += 1
+                continue
+            self._seen_urls.add(url)
+            self._queue.append(row)
+            added += 1
+        self.metrics.produced += added
+        return added
 
     def consume(
         self,
         max_items: int,
-        ingest_fn,
-        sketch_hooks: list | None = None,
+        ingest_fn: Callable[[pd.DataFrame], int],
     ) -> tuple[int, int]:
-        """Consume up to max_items from queue; dedup; ingest via callback."""
-        buf: list[dict[str, Any]] = []
-        deduped = 0
-        while self.queue and len(buf) < max_items:
-            row = self.queue.popleft()
-            if self._is_duplicate(row):
-                deduped += 1
-                continue
-            buf.append(row)
-            self._mark_seen(row)
-
-        inserted = 0
-        if buf:
-            batch = pd.DataFrame(buf)
-            inserted = int(ingest_fn(batch))
-            if sketch_hooks:
-                for hook in sketch_hooks:
-                    hook(batch)
-
-        self.metrics.deduped += deduped
+        if not self._queue:
+            return 0, 0
+        take = self._queue[: int(max_items)]
+        self._queue = self._queue[int(max_items) :]
+        batch = pd.DataFrame(take)
+        inserted = int(ingest_fn(batch))
         self.metrics.ingested += inserted
-        return inserted, deduped
-
-    def pending(self) -> int:
-        return len(self.queue)
-
-
-def try_kafka_publish(rows: list[dict[str, Any]], bootstrap: str = "localhost:9092") -> int:
-    """Optional: publish to Kafka if broker is running. Returns count sent or 0."""
-    if not rows:
-        return 0
-    try:
-        from kafka import KafkaProducer
-
-        producer = KafkaProducer(
-            bootstrap_servers=bootstrap,
-            value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
-            request_timeout_ms=3000,
-            api_version_auto_timeout_ms=3000,
-        )
-        topic = "engageiq.opportunities"
-        for row in rows:
-            producer.send(topic, row)
-        producer.flush(timeout=5)
-        producer.close()
-        return len(rows)
-    except Exception:
-        return 0
+        skipped = len(batch) - inserted
+        self.metrics.deduped += skipped
+        return inserted, skipped
