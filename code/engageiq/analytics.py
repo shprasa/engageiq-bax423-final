@@ -35,6 +35,21 @@ def compute_trends_from_df(df: pd.DataFrame, days: int = 30) -> TrendSummary:
     return TrendSummary(by_domain=by_domain, by_source=by_source, volume_over_time=volume_over_time)
 
 
+def compute_wow_domain_growth(df: pd.DataFrame) -> pd.DataFrame:
+    """Week-over-week domain volume change for trend analytics (Lina persona)."""
+    work = df.copy()
+    work["created_at"] = pd.to_datetime(work["created_at"], errors="coerce")
+    now = pd.Timestamp.now()
+    this_week = work[work["created_at"] >= (now - pd.Timedelta(days=7))]
+    last_week = work[(work["created_at"] >= (now - pd.Timedelta(days=14))) & (work["created_at"] < (now - pd.Timedelta(days=7)))]
+    cur = this_week.groupby("domain").size().rename("this_week")
+    prev = last_week.groupby("domain").size().rename("last_week")
+    wow = pd.concat([cur, prev], axis=1).fillna(0).reset_index()
+    wow["delta"] = wow["this_week"] - wow["last_week"]
+    wow["pct_change"] = wow["delta"] / (wow["last_week"] + 1)
+    return wow.sort_values("delta", ascending=False)
+
+
 def compute_trends(duckdb_path: str, days: int = 30) -> TrendSummary:
     since = (datetime.now() - timedelta(days=int(days))).strftime("%Y-%m-%dT%H:%M:%S")
     con = duckdb.connect(duckdb_path, read_only=True)
