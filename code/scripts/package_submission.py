@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import shutil
-import sys
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-DESKTOP = ROOT.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DESKTOP = PROJECT_ROOT.parent
 ZIP_NAME = "Prasad_Shivneel_BAX423_Final.zip"
 STAGING = DESKTOP / "_submission_staging"
-SKIP = {".env", "__pycache__", ".git", ".venv", "venv"}
+SKIP = {".env", "__pycache__", ".git", ".venv", "venv", ".streamlit/deploy_trigger.txt"}
 
 
 def should_skip(path: Path) -> bool:
@@ -17,7 +16,7 @@ def should_skip(path: Path) -> bool:
         return True
     if path.suffix in {".duckdb", ".duckdb.wal", ".pyc"}:
         return True
-    return any(p in SKIP for p in path.parts)
+    return any(part in SKIP for part in path.parts)
 
 
 def main() -> None:
@@ -26,26 +25,25 @@ def main() -> None:
     (STAGING / "code").mkdir(parents=True)
     (STAGING / "data").mkdir(parents=True)
 
-    for src, dst_name in [
-        (ROOT / "code", STAGING / "code"),
-        (ROOT / "data" / "opportunities_snapshot.csv", STAGING / "data" / "opportunities_snapshot.csv"),
-        (ROOT / "data" / "benchmark_results.json", STAGING / "data" / "benchmark_results.json"),
-        (ROOT / "brief.pdf", STAGING / "brief.pdf"),
-        (ROOT / "prompts.md", STAGING / "prompts.md"),
+    code_src = PROJECT_ROOT / "code"
+    for p in code_src.rglob("*"):
+        if p.is_dir() or should_skip(p):
+            continue
+        rel = p.relative_to(code_src)
+        out = STAGING / "code" / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, out)
+
+    for src in [
+        PROJECT_ROOT / "data" / "opportunities_snapshot.csv",
+        PROJECT_ROOT / "data" / "benchmark_results.json",
+        PROJECT_ROOT / "brief.pdf",
+        PROJECT_ROOT / "prompts.md",
     ]:
-        if src.is_dir():
-            for p in src.rglob("*"):
-                if p.is_dir() or should_skip(p):
-                    continue
-                rel = p.relative_to(src)
-                out = STAGING / "code" / rel if dst_name.name == "code" else dst_name
-                if dst_name.name == "code":
-                    out = STAGING / "code" / rel
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(p, out)
-        elif src.exists():
-            dst_name.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst_name)
+        if src.exists():
+            dst = STAGING / src.relative_to(PROJECT_ROOT)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
 
     zip_path = DESKTOP / ZIP_NAME
     if zip_path.exists():
