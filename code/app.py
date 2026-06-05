@@ -17,6 +17,8 @@ from engageiq.data import OpportunityStore
 from engageiq.data_utils import _safe_int, display_title, is_live_url, live_mask, ranking_corpus
 from engageiq.embedding import build_index
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
+from engageiq.sketches import BloomFilter, CountMinSketch, HyperLogLog
+from engageiq.streaming import OpportunityStream, try_kafka_publish
 from engageiq.suggestions import generate_suggestion, openai_configured
 from engageiq.ui import (
     Action,
