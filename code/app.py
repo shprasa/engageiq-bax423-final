@@ -14,7 +14,7 @@ from engageiq.reinforcement_learning import EngagementRLAgent
 from engageiq.brief_export import BriefConfig, export_brief_csv, export_brief_pdf
 from engageiq.config import get_paths
 from engageiq.data import OpportunityStore
-from engageiq.data_utils import is_live_url, live_mask, ranking_corpus
+from engageiq.data_utils import display_title, is_live_url, live_mask, ranking_corpus
 from engageiq.embedding import build_index
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
 from engageiq.sketches import BloomFilter, CountMinSketch, HyperLogLog
@@ -130,15 +130,33 @@ def _explain_row(row: pd.Series) -> str:
 
 
 def _suggest_action(row: pd.Series) -> str:
-    src = str(row.get("source", ""))
-    dom = str(row.get("domain", ""))
+    src = str(row.get("source", "")).lower()
+    headline = display_title(row)
+    community = str(row.get("community") or row.get("domain") or "")
+
     if src == "github":
         if int(row.get("good_first_issue") or 0) == 1:
-            return f"Pick one good-first-issue in {dom}, confirm scope in a comment, then open a small PR."
-        return f"Review open issues in {dom}, propose a docs or test improvement, then submit a PR."
+            return (
+                f"Open the issue \"{headline[:80]}\" in {community}, comment to confirm scope, "
+                "then submit a small focused PR (docs, test, or UI fix)."
+            )
+        return (
+            f"Visit {community}, read the README and recent issues, pick one small improvement "
+            "(documentation, test coverage, or bug fix), and open a PR with a clear description."
+        )
     if src == "reddit":
-        return f"Write a 5–8 sentence comment in {dom} with a concrete tip, one link, and a question to invite replies."
-    return f"Post a thoughtful HN comment in {dom} — summarize trade-offs and add one practical takeaway."
+        com = int(float(row.get("comments") or 0))
+        return (
+            f"Read \"{headline[:80]}\" and the top {min(com, 10)} comments, then reply with "
+            "a concrete tip, one helpful link, and a question to keep the thread going."
+        )
+    if src == "hackernews":
+        pts = int(float(row.get("upvotes") or 0))
+        return (
+            f"Read \"{headline[:80]}\" ({pts:,} pts), open the HN discussion, and post a "
+            "5–8 sentence comment with one practical takeaway and a follow-up question."
+        )
+    return f"Review \"{headline[:80]}\" and decide whether to engage based on your profile fit."
 
 
 def _apply_pending_feedback(user: UserState) -> None:
@@ -152,7 +170,7 @@ def _apply_pending_feedback(user: UserState) -> None:
     record_feedback(row, action)
     reward = user.rl_agent.observe_feedback(str(row["domain"]), action)
     if action in ("engage", "bookmark"):
-        snippet = f"{row['domain']}: {row['title']}"
+        snippet = f"{row['domain']}: {display_title(row)}"
         if snippet not in user.liked_texts:
             user.liked_texts.append(snippet)
     st.toast(
