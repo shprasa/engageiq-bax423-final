@@ -34,7 +34,7 @@
 | 1 | Multi-source ingest + streaming + dedup | Done |
 | 2 | Embeddings + ANN retrieval | Done |
 | 3 | Multi-stage ranking + NDCG@10 | Done |
-| 4 | Adaptive learning (50+ rounds) | Done |
+| 4 | Adaptive learning / RL (50+ rounds) | Done | Thompson sampling contextual bandit |
 | 5 | Batch analytics + trends | Done |
 | 6 | Dashboard + brief export | Done |
 
