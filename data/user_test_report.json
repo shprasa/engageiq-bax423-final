@@ -1,5 +1,5 @@
 {
-  "passed": 11,
+  "passed": 12,
   "failed": 0,
   "warnings": [],
   "failures": [],
@@ -12,6 +12,7 @@
     "live_card_titles",
     "card_decision_info",
     "live_only_ranking",
+    "plain_text_summaries",
     "persona_benchmarks",
     "user_session_simulation",
     "suggest_action_quality"
