@@ -31,7 +31,7 @@ def ranking_corpus(df: pd.DataFrame, live_only: bool = True) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def excerpt(text: str, max_len: int = 220) -> str:
+def excerpt(text: str, max_len: int = 320) -> str:
     raw = re.sub(r"\s+", " ", str(text or "")).strip()
     if not raw or raw.lower().startswith("looking for insights on"):
         return ""
@@ -50,55 +50,196 @@ def format_created(value) -> str:
         return "—"
 
 
-def opportunity_meta(row: pd.Series) -> str:
-    parts: list[str] = []
-    author = str(row.get("author") or "").strip()
-    community = str(row.get("community") or "").strip()
-    if author:
-        parts.append(f"by {author}")
-    if community and community != author:
-        parts.append(community)
-    parts.append(format_created(row.get("created_at")))
+def _is_github_issue(row: pd.Series) -> bool:
+    url = str(row.get("url") or "").lower()
+    if "/issues/" in url:
+        return True
+    return int(row.get("good_first_issue") or 0) == 1 and str(row.get("source", "")).lower() == "github"
 
+
+def opportunity_type_label(row: pd.Series) -> str:
     src = str(row.get("source", "")).lower()
     if src == "github":
-        stars = row.get("stars")
-        forks = row.get("forks")
-        issues = row.get("issues_open")
-        if pd.notna(stars) and str(stars) != "":
-            parts.append(f"★ {int(float(stars)):,}")
-        if pd.notna(forks) and str(forks) != "":
-            parts.append(f"⑂ {int(float(forks)):,}")
-        if pd.notna(issues) and str(issues) != "":
-            parts.append(f"issues {int(float(issues)):,}")
+        if _is_github_issue(row):
+            return "GitHub Issue · Good First Issue" if int(row.get("good_first_issue") or 0) == 1 else "GitHub Issue"
+        return "GitHub Repository"
+    if src == "hackernews":
+        url = str(row.get("url") or "")
+        if "news.ycombinator.com/item" in url:
+            return "Hacker News Discussion"
+        return "Hacker News Story"
+    if src == "reddit":
+        return "Reddit Thread"
+    return "Engagement Opportunity"
+
+
+def display_title(row: pd.Series) -> str:
+    """Primary headline — real title from the source API."""
+    src = str(row.get("source", "")).lower()
+    title = str(row.get("title") or "").strip()
+    community = str(row.get("community") or "").strip()
+    text = str(row.get("text") or "").strip()
+
+    if src == "github":
+        if _is_github_issue(row):
+            return title or "Untitled GitHub issue"
+        # Repository: prefer human-readable description as headline when title is just owner/repo
+        if community and (title == community or "/" in title and len(title) < 80):
+            if text and text.lower() != title.lower() and not text.lower().startswith("looking for insights"):
+                return text
+            return community
+        return title or community or "GitHub repository"
+
+    if src == "hackernews":
+        return title or "Hacker News story"
+
+    if src == "reddit":
+        return title or "Reddit discussion"
+
+    if title.lower().startswith(f"{row.get('domain', '')} - opportunity".lower()):
+        return text or title
+    return title or "Opportunity"
+
+
+def display_subtitle(row: pd.Series) -> str:
+    """Secondary context line under the headline."""
+    src = str(row.get("source", "")).lower()
+    title = str(row.get("title") or "").strip()
+    community = str(row.get("community") or "").strip()
+    author = str(row.get("author") or "").strip()
+
+    if src == "github":
+        if _is_github_issue(row):
+            parts = [f"Repository: {community}" if community else ""]
+            if author:
+                parts.append(f"Opened by {author}")
+            return " · ".join(p for p in parts if p)
+        parts = []
+        if community and community != display_title(row):
+            parts.append(community)
+        if author:
+            parts.append(f"maintainer {author}")
         lang = str(row.get("lang") or "").strip()
         if lang:
             parts.append(lang)
-    else:
-        up = row.get("upvotes")
-        com = row.get("comments")
-        if pd.notna(up):
-            parts.append(f"↑ {int(float(up)):,}")
-        if pd.notna(com):
-            parts.append(f"💬 {int(float(com)):,}")
+        return " · ".join(parts) if parts else "Open-source project on GitHub"
 
-    return " · ".join(parts)
+    if src == "hackernews":
+        pts = int(float(row.get("upvotes") or 0))
+        com = int(float(row.get("comments") or 0))
+        parts = [f"{pts:,} points", f"{com:,} comments"]
+        if author:
+            parts.append(f"by {author}")
+        return " · ".join(parts)
+
+    if src == "reddit":
+        parts = []
+        if community:
+            parts.append(f"r/{community}" if not community.startswith("r/") else community)
+        if author:
+            parts.append(f"u/{author}")
+        return " · ".join(parts) if parts else "Community discussion on Reddit"
+
+    return str(row.get("domain") or "")
+
+
+def display_summary(row: pd.Series) -> str:
+    """Longer body text to help the user decide."""
+    src = str(row.get("source", "")).lower()
+    title = str(row.get("title") or "").strip()
+    text = excerpt(str(row.get("text") or ""), max_len=400)
+    headline = display_title(row)
+
+    if src == "github":
+        if _is_github_issue(row):
+            return text or f"Issue in {row.get('community', 'repository')}: {title}"
+        if text and text.lower() != headline.lower():
+            return text
+        stars = row.get("stars")
+        issues = row.get("issues_open")
+        bits = [f"Repository {row.get('community', title)}."]
+        if pd.notna(stars) and str(stars) != "":
+            bits.append(f"{int(float(stars)):,} stars.")
+        if pd.notna(issues) and str(issues) != "":
+            bits.append(f"{int(float(issues)):,} open issues.")
+        bits.append("Browse issues and README to find a contribution entry point.")
+        return " ".join(bits)
+
+    if src == "hackernews":
+        if text and text.lower() != title.lower():
+            return text
+        url = str(row.get("url") or "")
+        if "news.ycombinator.com/item" in url:
+            return f"Active Hacker News thread with {int(float(row.get('comments') or 0)):,} comments — join the technical discussion."
+        return f"Trending link shared on Hacker News ({int(float(row.get('upvotes') or 0)):,} points). Read the article, then add a substantive comment on the discussion thread."
+
+    if src == "reddit":
+        if text:
+            return text
+        return f"Discussion thread in {row.get('domain', 'tech community')} — read comments and add value with a specific tip or question."
+
+    return text or f"Opportunity in {row.get('domain', 'this domain')}."
+
+
+def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
+    """Key-value facts for the decision panel."""
+    facts: list[tuple[str, str]] = [
+        ("Source", opportunity_type_label(row)),
+        ("Domain", str(row.get("domain") or "—")),
+        ("Posted", format_created(row.get("created_at"))),
+    ]
+    src = str(row.get("source", "")).lower()
+
+    if src == "github":
+        if pd.notna(row.get("stars")) and str(row.get("stars")) != "":
+            facts.append(("Stars", f"{int(float(row['stars'])):,}"))
+        if pd.notna(row.get("forks")) and str(row.get("forks")) != "":
+            facts.append(("Forks", f"{int(float(row['forks'])):,}"))
+        if pd.notna(row.get("issues_open")) and str(row.get("issues_open")) != "":
+            facts.append(("Open issues", f"{int(float(row['issues_open'])):,}"))
+        lang = str(row.get("lang") or "").strip()
+        if lang:
+            facts.append(("Language", lang))
+        if int(row.get("good_first_issue") or 0) == 1:
+            facts.append(("Contribution", "Good first issue"))
+    elif src == "hackernews":
+        facts.append(("Points", f"{int(float(row.get('upvotes') or 0)):,}"))
+        facts.append(("Comments", f"{int(float(row.get('comments') or 0)):,}"))
+        author = str(row.get("author") or "").strip()
+        if author:
+            facts.append(("Author", author))
+    elif src == "reddit":
+        facts.append(("Upvotes", f"{int(float(row.get('upvotes') or 0)):,}"))
+        facts.append(("Comments", f"{int(float(row.get('comments') or 0)):,}"))
+
+    author = str(row.get("author") or "").strip()
+    if author and not any(k == "Author" for k, _ in facts):
+        facts.append(("Author", author))
+
+    community = str(row.get("community") or "").strip()
+    if community and src == "github":
+        facts.append(("Repo", community[:40]))
+
+    return facts
+
+
+def estimated_engagement_time(row: pd.Series) -> str:
+    effort = float(row.get("score_effort") or 0.5)
+    if int(row.get("good_first_issue") or 0) == 1:
+        return "< 1 hour (good first issue)"
+    if effort < 0.35:
+        return "< 1 hour"
+    if effort < 0.65:
+        return "1–2 hours"
+    return "2+ hours (deeper contribution)"
+
+
+def opportunity_meta(row: pd.Series) -> str:
+    return " · ".join(f"{k}: {v}" for k, v in decision_facts(row)[:6])
 
 
 def describe_opportunity(row: pd.Series) -> str:
-    body = excerpt(str(row.get("text") or ""))
-    if body:
-        return body
-    src = str(row.get("source", "")).lower()
-    title = str(row.get("title") or "")
-    domain = str(row.get("domain") or "")
-    if src == "hackernews":
-        return f"Hacker News discussion in {domain}: {title}"
-    if src == "github":
-        return f"Open-source repository in {domain} — explore issues and contribution opportunities."
-    if src == "reddit":
-        return f"Community thread in {domain} — join the discussion with a substantive comment."
-    return f"Engagement opportunity in {domain}."
+    return display_summary(row)
 
 
 def escape_html(text: str) -> str:
