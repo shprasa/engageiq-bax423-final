@@ -6,6 +6,10 @@ import numpy as np
 import pandas as pd
 
 from .bandit import BetaBandit
+from .reinforcement_learning import EngagementRLAgent
+
+# Backward-compatible alias — bandit is the RL policy object used in ranking
+RLAgent = EngagementRLAgent | BetaBandit
 
 
 @dataclass
@@ -97,7 +101,7 @@ def augment_candidates(
 def rerank(
     candidates: pd.DataFrame,
     relevance01: np.ndarray,
-    bandit: BetaBandit | None,
+    bandit: BetaBandit | EngagementRLAgent | None,
     rng: np.random.Generator,
     cfg: RankConfig,
     interest_text: str = "",
