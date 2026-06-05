@@ -1,0 +1,19 @@
+{
+  "passed": 11,
+  "failed": 0,
+  "warnings": [],
+  "failures": [],
+  "passed_checks": [
+    "submission_files",
+    "app_imports",
+    "ui_native_cards",
+    "bundled_cloud_data",
+    "dataset_size",
+    "live_card_titles",
+    "card_decision_info",
+    "live_only_ranking",
+    "persona_benchmarks",
+    "user_session_simulation",
+    "suggest_action_quality"
+  ]
+}
