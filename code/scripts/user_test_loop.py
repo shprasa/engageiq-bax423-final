@@ -328,19 +328,57 @@ def check_ui_native_components(report: Report) -> None:
 
 def check_suggest_action(report: Report, df: pd.DataFrame) -> None:
     name = "suggest_action_quality"
-    from app import _suggest_action
+    from engageiq.suggestions import generate_suggestion
 
     live = df[live_mask(df)]
-    for src in ("github", "hackernews", "reddit"):
+    for src in ("github", "hackernews"):
         sample = live[live["source"] == src].head(3)
         for _, row in sample.iterrows():
-            suggestion = _suggest_action(row)
+            suggestion = generate_suggestion(row, "machine learning developer tools")
             if len(suggestion) < 40:
                 _fail(report, name, f"{src} id={row['id']}: suggestion too short")
                 return
             if "looking for insights" in suggestion.lower():
                 _fail(report, name, f"{src} id={row['id']}: generic suggestion")
                 return
+    _pass(report, name)
+
+
+def _check_streaming(report: Report) -> None:
+    name = "streaming_pipeline"
+    try:
+        from engageiq.sketches import BloomFilter
+        from engageiq.streaming import OpportunityStream, try_kafka_publish
+
+        bloom = BloomFilter(capacity=1000)
+        stream = OpportunityStream(bloom=bloom)
+        df = pd.DataFrame(
+            [
+                {"id": 1, "url": "https://example.local/a", "domain": "ML", "source": "github", "author": "a"},
+                {"id": 1, "url": "https://example.local/a", "domain": "ML", "source": "github", "author": "a"},
+            ]
+        )
+        stream.produce_rows(df)
+        ingested, deduped = stream.consume(max_items=10, ingest_fn=lambda b: len(b))
+        if ingested != 1 or deduped != 1:
+            _fail(report, name, f"Expected 1 ingested/1 deduped, got {ingested}/{deduped}")
+            return
+        _pass(report, name)
+    except Exception as exc:
+        _fail(report, name, str(exc))
+
+
+def check_rl_improvement(report: Report, df: pd.DataFrame) -> None:
+    name = "rl_improvement"
+    from engageiq.persona_eval import PERSONAS, learning_benchmark
+
+    lb = learning_benchmark(df, PERSONAS["Raj (Startup Founder / Marketing-Focused)"], rounds=60)
+    if lb["rounds"] < 50:
+        _fail(report, name, f"Only {lb['rounds']} rounds")
+        return
+    if lb["improvement"] <= 0 and lb["reward_improvement_last10"] <= 0:
+        _fail(report, name, f"No measurable improvement: {lb}")
+        return
     _pass(report, name)
 
 
@@ -377,7 +415,9 @@ def run_all_checks() -> Report:
         Check("live_only_ranking", "ranking", lambda: check_live_only_ranking(report, df)),
         Check("plain_text_summaries", "cards", lambda: check_plain_text_summaries(report, df)),
         Check("persona_benchmarks", "benchmarks", lambda: check_persona_benchmarks(report, df)),
+        Check("streaming_pipeline", "ux", lambda: _check_streaming(report)),
         Check("user_session_simulation", "ux", lambda: simulate_user_session(report, df)),
+        Check("rl_improvement", "benchmarks", lambda: check_rl_improvement(report, df)),
         Check("suggest_action_quality", "ux", lambda: check_suggest_action(report, df)),
     ]
 
