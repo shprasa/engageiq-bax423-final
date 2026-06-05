@@ -1,0 +1,15 @@
+streamlit
+pandas
+numpy
+scikit-learn
+duckdb
+pyarrow
+altair
+reportlab
+python-dateutil
+kafka-python
+requests
+certifi
+truststore
+python-dotenv
+praw
