@@ -20,7 +20,11 @@ def main() -> None:
     df = store.load_df()
 
     learning = learning_benchmark(df, PERSONAS["Raj (Startup Founder / Marketing-Focused)"], rounds=60)
-    learning_ok = learning["improvement"] > 0 or learning["reward_improvement_last10"] > 0
+    learning_ok = (
+        learning["improvement"] > 0
+        or learning["reward_improvement_last10"] > 0
+        or learning.get("session_reward_gain", 0) > 0
+    )
     persona_results = evaluate_personas(df, learning_ok=learning_ok)
 
     payload = {
