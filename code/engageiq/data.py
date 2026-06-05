@@ -37,8 +37,12 @@ class OpportunityStore:
         self.duckdb_path = duckdb_path
 
     def connect(self) -> duckdb.DuckDBPyConnection:
-        self.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
-        con = duckdb.connect(str(self.duckdb_path))
+        path = self.duckdb_path
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            con = duckdb.connect(str(path))
+        except Exception:
+            con = duckdb.connect(":memory:")
         con.execute("PRAGMA threads=4;")
         return con
 
