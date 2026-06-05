@@ -41,6 +41,7 @@ def export_brief_pdf(
     out_path: Path,
     persona_name: str,
     cfg: BriefConfig,
+    rising_df: pd.DataFrame | None = None,
 ) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     pdf_path = out_path.with_suffix(".pdf")
@@ -108,6 +109,16 @@ def export_brief_pdf(
         )
     )
     story.append(t2)
+
+    if rising_df is not None and not rising_df.empty:
+        story.append(Spacer(1, 0.15 * inch))
+        story.append(Paragraph("<b>Rising opportunities (week-over-week)</b>", styles["Heading2"]))
+        rrows = [["Domain", "This wk", "Last wk", "Delta"]]
+        for _, rr in rising_df.head(6).iterrows():
+            rrows.append([str(rr["domain"])[:24], str(int(rr["this_week"])), str(int(rr["last_week"])), str(int(rr["delta"]))])
+        t3 = Table(rrows, colWidths=[2.2 * inch, 0.8 * inch, 0.8 * inch, 0.8 * inch])
+        t3.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.25, colors.grey)]))
+        story.append(t3)
 
     doc.build(story)
     return pdf_path
