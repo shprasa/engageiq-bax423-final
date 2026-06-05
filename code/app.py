@@ -17,10 +17,7 @@ from engageiq.data import OpportunityStore
 from engageiq.data_utils import _safe_int, display_title, is_live_url, live_mask, ranking_corpus
 from engageiq.embedding import build_index
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
-from engageiq.secrets import openai_configured
-from engageiq.sketches import BloomFilter, CountMinSketch, HyperLogLog
-from engageiq.streaming import OpportunityStream, try_kafka_publish
-from engageiq.suggestions import generate_suggestion
+from engageiq.suggestions import generate_suggestion, openai_configured
 from engageiq.ui import (
     Action,
     activity_counts,
@@ -101,7 +98,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 8}
+    return store, {"paths": paths, "version": 9}
 
 
 @st.cache_resource
