@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from engageiq.analytics import compute_trends, compute_trends_from_df, compute_wow_domain_growth
-from engageiq.bandit import BetaBandit
+from engageiq.reinforcement_learning import EngagementRLAgent
 from engageiq.brief_export import BriefConfig, export_brief_csv, export_brief_pdf
 from engageiq.config import get_paths
 from engageiq.data import OpportunityStore
@@ -28,6 +28,7 @@ from engageiq.ui import (
     render_bookmarks_list,
     render_hero,
     render_opportunity_card,
+    render_rl_policy,
 )
 
 PERSONAS: dict[str, str] = {
@@ -60,7 +61,7 @@ CHART_THEME = {
 class UserState:
     interest_text: str
     liked_texts: list[str]
-    bandit: BetaBandit
+    rl_agent: EngagementRLAgent
     rng: np.random.Generator
 
 
@@ -109,7 +110,7 @@ def _init_user_state(domains: list[str]) -> UserState:
     return UserState(
         interest_text=PERSONAS["Sofia (ML Student / Portfolio Builder)"],
         liked_texts=[],
-        bandit=BetaBandit(arms=domains),
+        rl_agent=EngagementRLAgent(arms=domains, policy="thompson"),
         rng=np.random.default_rng(42),
     )
 
@@ -149,14 +150,15 @@ def _apply_pending_feedback(user: UserState) -> None:
     action, row_data = pending
     row = pd.Series(row_data)
     record_feedback(row, action)
+    reward = user.rl_agent.observe_feedback(str(row["domain"]), action)
     if action in ("engage", "bookmark"):
-        user.bandit.update(str(row["domain"]), 1)
         snippet = f"{row['domain']}: {row['title']}"
         if snippet not in user.liked_texts:
             user.liked_texts.append(snippet)
-    elif action == "skip":
-        user.bandit.update(str(row["domain"]), 0)
-    st.toast(f"Recorded: {action.replace('_', ' ').title()}", icon="✅" if action != "skip" else "⏭️")
+    st.toast(
+        f"RL reward {reward:+.2f} · {action.replace('_', ' ').title()}",
+        icon="✅" if reward > 0 else "⏭️",
+    )
 
 
 def _chart(df: pd.DataFrame, mark_fn, encode_kwargs: dict) -> alt.Chart:
@@ -187,7 +189,7 @@ def _rank_opportunities(
     return rerank(
         candidates=candidates,
         relevance01=relevance,
-        bandit=user.bandit,
+        bandit=user.rl_agent,
         rng=user.rng,
         cfg=RankConfig(),
         interest_text=q,
@@ -273,6 +275,9 @@ def main() -> None:
             help="When on, rankings use real GitHub/HN URLs. Turn off to include offline backup records.",
         )
 
+        st.markdown("**Reinforcement learning**")
+        render_rl_policy(user.rl_agent)
+
         st.markdown("---")
         st.markdown("**Pipeline controls**")
         batch_size = st.slider("Ingest batch size", 50, 2000, 500, 50)
@@ -306,7 +311,7 @@ def main() -> None:
         title="EngageIQ — Engagement Opportunity Scorer",
         subtitle=(
             f"{len(df):,} opportunities in store · {live_n:,} from live GitHub & Hacker News APIs · "
-            "Streaming sketches · Embeddings + ANN · Multi-stage ranking · Adaptive learning"
+            "Streaming sketches · Embeddings + ANN · Multi-stage ranking · Reinforcement learning"
         ),
         stats={
             "Dataset": f"{len(df):,}",
@@ -316,8 +321,8 @@ def main() -> None:
         },
     )
 
-    tab_discover, tab_bookmarks, tab_activity, tab_analytics = st.tabs(
-        ["🔍 Discover", "★ Bookmarks", "📋 Activity Log", "📈 Analytics"]
+    tab_discover, tab_bookmarks, tab_activity, tab_rl, tab_analytics = st.tabs(
+        ["🔍 Discover", "★ Bookmarks", "📋 Activity Log", "🧠 RL Policy", "📈 Analytics"]
     )
 
     ranked = _rank_opportunities(df, user, user.interest_text, version, live_only)
@@ -372,6 +377,25 @@ def main() -> None:
                 file_name=f"engageiq_activity_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
             )
+
+    with tab_rl:
+        st.markdown("#### Reinforcement learning from feedback")
+        st.caption(
+            "EngageIQ uses a **contextual multi-armed bandit** (Thompson sampling) to learn which domains "
+            "you prefer. Actions: engage (+1.0), bookmark (+0.85), skip (0.0)."
+        )
+        render_rl_policy(user.rl_agent)
+
+        if user.rl_agent.reward_history:
+            hist = pd.DataFrame(user.rl_agent.reward_history)
+            st.markdown("**Reward history (this session)**")
+            cum_chart = (
+                alt.Chart(hist)
+                .mark_line(point=True, color="#10B981")
+                .encode(x="round:Q", y="cumulative_reward:Q", tooltip=["round", "reward", "arm"])
+                .properties(height=240)
+            )
+            st.altair_chart(cum_chart, use_container_width=True)
 
     with tab_analytics:
         try:
@@ -438,34 +462,20 @@ def main() -> None:
             )
             st.success(f"Exported: {out.name}")
 
-        st.markdown("**Adaptive learning simulation (60 rounds)**")
-        if ex3.button("Run simulation", use_container_width=True):
-            sim_user = _init_user_state(domains)
-            sim_user.interest_text = user.interest_text
-            corpus = ranking_corpus(df, live_only=live_only)
-            corpus_key = f"sim_{len(corpus)}_{live_only}"
-            index = _build_embedding_index(version, corpus_key, corpus)
-            ndcgs: list[float] = []
-            for _ in range(60):
-                s_idxs, s_dists = index.query(sim_user.interest_text, top_k=RankConfig().candidate_k)
-                cand = corpus.iloc[s_idxs].copy().reset_index(drop=True)
-                cand = augment_candidates(cand, corpus, sim_user.interest_text)
-                rel = np.clip(1.0 - np.asarray(s_dists), 0.0, 1.0)
-                if len(cand) > len(rel):
-                    rel = np.pad(rel, (0, len(cand) - len(rel)), constant_values=0.35)
-                rel = rel[: len(cand)]
-                r = rerank(cand, rel, sim_user.bandit, sim_user.rng, RankConfig(), interest_text=sim_user.interest_text)
-                probs = [0.55 if rr["domain"].lower() in sim_user.interest_text.lower() else 0.15 for _, rr in r.iterrows()]
-                chosen = int(sim_user.rng.integers(0, len(r)))
-                reward = 1 if sim_user.rng.random() < probs[chosen] else 0
-                sim_user.bandit.update(str(r.loc[chosen, "domain"]), reward)
-                sim_labels = [1 if r.loc[i, "domain"].lower() in sim_user.interest_text.lower() else 0 for i in range(len(r))]
-                ndcgs.append(ndcg_at_k(sim_labels, 10))
+        st.markdown("**RL simulation benchmark (60 rounds · Thompson sampling vs no-RL)**")
+        if ex3.button("Run RL simulation", use_container_width=True):
+            from engageiq.persona_eval import learning_benchmark
 
-            r1, r2, r3 = st.columns(3)
-            r1.metric("NDCG first 10", f"{float(np.mean(ndcgs[:10])):.3f}")
-            r2.metric("NDCG last 10", f"{float(np.mean(ndcgs[-10:])):.3f}")
-            r3.metric("Improvement", f"{float(np.mean(ndcgs[-10:]) - np.mean(ndcgs[:10])):+.3f}")
+            lb = learning_benchmark(df, user.interest_text, rounds=60)
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("NDCG w/ RL (last 10)", f"{lb['ndcg@10_last10_avg']:.3f}")
+            r2.metric("NDCG w/o RL (last 10)", f"{lb['ndcg@10_without_rl_last10']:.3f}")
+            r3.metric("Reward Δ (last 10)", f"{lb['reward_improvement_last10']:+.3f}")
+            r4.metric("Cumulative reward", f"{lb['cumulative_reward_with_rl']:.0f}")
+            st.caption(
+                f"Policy: {lb['policy']} · formulation: {lb['rl_formulation']} · "
+                f"entropy={lb['policy_entropy']:.2f}"
+            )
 
 
 if __name__ == "__main__":
