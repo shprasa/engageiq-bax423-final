@@ -57,6 +57,12 @@ def scrape_hackernews(max_stories: int = 3500) -> pd.DataFrame:
 
         title = item.get("title") or ""
         url = item.get("url") or f"https://news.ycombinator.com/item?id={story_id}"
+        body = (item.get("text") or "").strip()
+        # For Ask/Show HN posts, include self-text; for link posts use title + comment count context
+        if body:
+            text = f"{title}\n\n{body[:1500]}"
+        else:
+            text = title
         domain = _match_domain(title, url) or DOMAINS[i % len(DOMAINS)]
 
         ts = item.get("time")
@@ -72,7 +78,7 @@ def scrape_hackernews(max_stories: int = 3500) -> pd.DataFrame:
                 "source": "hackernews",
                 "domain": domain,
                 "title": title,
-                "text": title,
+                "text": text,
                 "url": url,
                 "community": "news.ycombinator.com",
                 "created_at": created,
