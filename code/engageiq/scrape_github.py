@@ -50,8 +50,10 @@ def scrape_github(per_domain: int = 250) -> pd.DataFrame:
     token = require_github_token()
     rows: list[dict] = []
     row_id = 1_000_000
+    print(f"  GitHub: up to {per_domain} items x {len(DOMAINS)} domains (~2-4 sec per search)", flush=True)
 
-    for domain in DOMAINS:
+    for di, domain in enumerate(DOMAINS, start=1):
+        print(f"  GitHub: domain {di}/{len(DOMAINS)} — {domain}", flush=True)
         keywords = DOMAIN_QUERIES[domain]["github"]
         collected = 0
         for kw in keywords:
