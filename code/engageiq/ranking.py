@@ -165,6 +165,10 @@ def rerank(
     recency = score_recency(candidates)
 
     trend_mode = any(k in interest_text.lower() for k in ("trend", "velocity", "viral", "recency"))
+    portfolio_mode = any(k in interest_text.lower() for k in ("good first issue", "beginner", "portfolio"))
+    devops_mode = any(
+        k in interest_text.lower() for k in ("kubernetes", "terraform", "devops", "ci/cd", "observability")
+    )
 
     # bandit provides a prior boost by domain
     if bandit is None:
@@ -214,8 +218,6 @@ def rerank(
         if kw_boost.max() > 0:
             kw_boost = kw_boost / (kw_boost.max() + 1e-9)
 
-    portfolio_mode = any(k in interest_text.lower() for k in ("good first issue", "beginner", "portfolio"))
-    devops_mode = any(k in interest_text.lower() for k in ("kubernetes", "terraform", "devops", "ci/cd", "observability"))
     niche_boost = np.zeros(len(candidates), dtype=np.float64)
     if devops_mode:
         stars = candidates["stars"].fillna(0).astype(float).to_numpy()

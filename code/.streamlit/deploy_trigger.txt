@@ -1,2 +1,2 @@
 # Bump to trigger Streamlit Cloud redeploy from latest GitHub commit.
-deploy_trigger=2026-06-03T18:30:00Z-ui-redesign
+deploy_trigger=2026-06-03T19:00:00Z-ranking-fix
