@@ -123,7 +123,7 @@ def run_rl_simulation(
         if ranked.empty:
             break
         # Evaluate and train on the top-ranked item (exploration handled inside Thompson sampling)
-        dom = str(ranked.iloc[0, "domain"])
+        dom = str(ranked.iloc[0]["domain"])
         dom_l = dom.lower()
 
         reward = 0.0
