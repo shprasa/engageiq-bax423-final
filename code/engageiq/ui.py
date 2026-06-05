@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from engageiq.data_utils import (
+    _safe_float,
     _safe_int,
     decision_facts,
     display_subtitle,
@@ -480,7 +481,7 @@ def score_pills(row: pd.Series) -> str:
     html = "".join(
         f'<span class="score-pill"><strong>{name}</strong> {float(val):.2f}</span>' for name, val in pills
     )
-    if str(row.get("source", "")) == "github" and int(row.get("good_first_issue") or 0) == 1:
+    if str(row.get("source", "")) == "github" and _safe_int(row.get("good_first_issue")) == 1:
         html += '<span class="score-pill" style="background:#ECFDF5;border-color:#A7F3D0;"><strong>GFI</strong> ✓</span>'
     return f'<div class="score-row">{html}</div>'
 
@@ -786,8 +787,8 @@ def render_rl_policy(agent) -> None:
 
 def render_activity_log(filter_action: str | None = None) -> None:
     log = st.session_state.get("activity_log", [])
-    if filter_action and filter_action != "All":
-        log = [e for e in log if e["action"] == filter_action.lower()]
+    if filter_action:
+        log = [e for e in log if str(e.get("action", "")).lower() == filter_action.lower()]
 
     if not log:
         st.markdown(
@@ -803,12 +804,14 @@ def render_activity_log(filter_action: str | None = None) -> None:
             with c1:
                 st.caption(e["timestamp"])
             with c2:
+                action_label = str(e.get("action", "unknown")).replace("_", " ").title()
                 st.markdown(
-                    f"**{e['action'].title()}** · {_source_label(e['source'])} · {e['domain']}"
+                    f"**{action_label}** · {_source_label(str(e.get('source', '')))} · {e.get('domain', '—')}"
                 )
-                st.write(e["title"])
-                if is_live_url(str(e["url"])):
-                    st.link_button("Open", str(e["url"]), key=f"log_{e['opp_id']}_{idx}")
+                st.write(e.get("title", "Untitled"))
+                url = str(e.get("url", ""))
+                if is_live_url(url):
+                    st.link_button("Open", url, key=f"log_{e.get('opp_id', idx)}_{idx}")
 
 
 def render_bookmarks_list() -> None:
@@ -823,28 +826,31 @@ def render_bookmarks_list() -> None:
 
     bookmarks = sorted(bookmarks, key=lambda b: b.get("bookmarked_at", ""), reverse=True)
     for i, b in enumerate(bookmarks, start=1):
-        url = str(b["url"])
+        url = str(b.get("url", ""))
+        title = str(b.get("title", "Untitled"))
+        domain = str(b.get("domain", "—"))
+        opp_id = b.get("opp_id", i)
         with st.container(border=True):
-            st.markdown(f"**#{i} · {b['title']}**")
+            st.markdown(f"**#{i} · {title}**")
             origin = ":green[Live API]" if is_live_url(url) else ":gray[Offline backup]"
-            st.markdown(f"**{origin}** · **{b['domain']}**")
+            st.markdown(f"**{origin}** · **{domain}**")
             if b.get("description"):
                 st.write(b["description"])
             if is_live_url(url):
-                st.link_button("Open on source site ↗", url, key=f"open_bm_{b['opp_id']}")
+                st.link_button("Open on source site ↗", url, key=f"open_bm_{opp_id}")
             st.caption(
-                f"Saved {b.get('bookmarked_at', '—')} · Score {float(b.get('score_final', 0)):.2f}"
+                f"Saved {b.get('bookmarked_at', '—')} · Score {_safe_float(b.get('score_final'), 0.0):.2f}"
             )
-            if st.button("Remove bookmark", key=f"rm_bm_{b['opp_id']}"):
+            if st.button("Remove bookmark", key=f"rm_bm_{opp_id}"):
                 st.session_state._pending_action = (
                     "unbookmark",
                     {
-                        "id": b["opp_id"],
-                        "title": b["title"],
-                        "url": b["url"],
-                        "domain": b["domain"],
-                        "source": b["source"],
-                        "score_final": b.get("score_final", 0),
+                        "id": opp_id,
+                        "title": title,
+                        "url": url,
+                        "domain": domain,
+                        "source": b.get("source", ""),
+                        "score_final": _safe_float(b.get("score_final"), 0.0),
                     },
                 )
                 st.rerun()

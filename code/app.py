@@ -475,13 +475,20 @@ def main() -> None:
 
     with tab_activity:
         st.markdown("#### Activity log")
+        action_filters = {
+            "All": None,
+            "Engage": "engage",
+            "Bookmark": "bookmark",
+            "Skip": "skip",
+            "Unbookmark": "unbookmark",
+        }
         filter_opt = st.radio(
             "Filter",
-            ["All", "Engage", "Bookmark", "Skip", "Unbookmark"],
+            list(action_filters.keys()),
             horizontal=True,
             label_visibility="collapsed",
         )
-        render_activity_log(None if filter_opt == "All" else filter_opt)
+        render_activity_log(action_filters[filter_opt])
         if st.session_state.get("activity_log"):
             st.download_button(
                 "Download activity log (CSV)",
@@ -504,37 +511,46 @@ def main() -> None:
 
         with col_a:
             st.markdown("**Volume by domain (30d)**")
-            dom_chart = _chart(
-                trends.by_domain,
-                lambda c: c.mark_bar(color="#4F46E5"),
-                {
-                    "x": alt.X("n:Q", title="Count"),
-                    "y": alt.Y("domain:N", sort="-x"),
-                    "tooltip": ["domain", "n", "avg_upvotes", "avg_comments"],
-                },
-            )
-            st.altair_chart(dom_chart, use_container_width=True)
+            if trends.by_domain.empty:
+                st.info("No domain volume data in the last 30 days.")
+            else:
+                dom_chart = _chart(
+                    trends.by_domain,
+                    lambda c: c.mark_bar(color="#4F46E5"),
+                    {
+                        "x": alt.X("n:Q", title="Count"),
+                        "y": alt.Y("domain:N", sort="-x"),
+                        "tooltip": ["domain", "n", "avg_upvotes", "avg_comments"],
+                    },
+                )
+                st.altair_chart(dom_chart, use_container_width=True)
 
         with col_b:
             st.markdown("**Daily volume**")
-            vol_chart = _chart(
-                trends.volume_over_time,
-                lambda c: c.mark_line(point=True, color="#4F46E5", strokeWidth=2),
-                {"x": alt.X("day:T"), "y": alt.Y("n:Q", title="Daily volume")},
-            )
-            st.altair_chart(vol_chart, use_container_width=True)
+            if trends.volume_over_time.empty:
+                st.info("No daily volume data in the last 30 days.")
+            else:
+                vol_chart = _chart(
+                    trends.volume_over_time,
+                    lambda c: c.mark_line(point=True, color="#4F46E5", strokeWidth=2),
+                    {"x": alt.X("day:T"), "y": alt.Y("n:Q", title="Daily volume")},
+                )
+                st.altair_chart(vol_chart, use_container_width=True)
 
         st.markdown("**Week-over-week rising domains**")
-        wow_chart = _chart(
-            wow.head(10),
-            lambda c: c.mark_bar(color="#0EA5E9"),
-            {
-                "x": alt.X("delta:Q", title="Volume change"),
-                "y": alt.Y("domain:N", sort="-x"),
-                "tooltip": ["domain", "this_week", "last_week", "delta", "pct_change"],
-            },
-        )
-        st.altair_chart(wow_chart, use_container_width=True)
+        if wow.empty:
+            st.info("Not enough data for week-over-week comparison.")
+        else:
+            wow_chart = _chart(
+                wow.head(10),
+                lambda c: c.mark_bar(color="#0EA5E9"),
+                {
+                    "x": alt.X("delta:Q", title="Volume change"),
+                    "y": alt.Y("domain:N", sort="-x"),
+                    "tooltip": ["domain", "this_week", "last_week", "delta", "pct_change"],
+                },
+            )
+            st.altair_chart(wow_chart, use_container_width=True)
 
         st.markdown("---")
         st.markdown("**RL benchmark (60 rounds vs no-RL baseline)**")

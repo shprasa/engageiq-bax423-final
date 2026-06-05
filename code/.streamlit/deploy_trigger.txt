@@ -1,2 +1,2 @@
-# Bump to trigger Streamlit Cloud redeploy — submission refresh Jun 5 2026
-deploy_trigger=2026-06-05T23:55:00Z-submission-refresh
+# Bump to trigger Streamlit Cloud redeploy — fix pd.NA suggestions crash
+deploy_trigger=2026-06-06T00:05:00Z-fix-pd-na-suggestions

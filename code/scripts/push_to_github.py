@@ -26,7 +26,7 @@ from engageiq.secrets import load_env
 OWNER = "shprasa"
 REPO = "engageiq-bax423-final"
 BRANCH = "main"
-COMMIT_MSG = "Refresh brief, prompts, rubric docs, and submission ZIP for Canvas"
+COMMIT_MSG = "Fix pd.NA crash in suggestions and tab rendering on Streamlit Cloud"
 
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "_tmp_engageiq_docx", ".cursor"}
 SKIP_NAMES = {".env", "engageiq.duckdb", "engageiq.duckdb.wal", "Thumbs.db", ".DS_Store"}

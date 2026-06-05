@@ -131,6 +131,21 @@ def _safe_int(value, default: int = 0) -> int:
         return default
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None or pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    try:
+        out = float(value)
+        if pd.isna(out):
+            return default
+        return out
+    except (TypeError, ValueError):
+        return default
+
+
 def _has_value(value) -> bool:
     try:
         if value is None or pd.isna(value):
@@ -238,7 +253,7 @@ def display_subtitle(row: pd.Series) -> str:
         return " · ".join(parts) if parts else "Open-source project on GitHub"
 
     if src == "gharchive":
-        com = int(float(row.get("comments") or 0))
+        com = _safe_int(row.get("comments"))
         parts = [f"{com:,} comments"]
         if author:
             parts.append(f"by {author}")
@@ -306,7 +321,7 @@ def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
             facts.append(("GFI", "Yes"))
     elif src == "gharchive":
         if _has_value(row.get("comments")):
-            facts.append(("Comments", f"{int(float(row.get('comments') or 0)):,}"))
+            facts.append(("Comments", f"{_safe_int(row.get('comments')):,}"))
         if community := str(row.get("community") or "").strip():
             facts.append(("Repo", _truncate_text(community, 22)))
 
@@ -322,7 +337,7 @@ def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
 
 
 def estimated_engagement_time(row: pd.Series) -> str:
-    effort = float(row.get("score_effort") or 0.5)
+    effort = _safe_float(row.get("score_effort"), 0.5)
     if _safe_int(row.get("good_first_issue")) == 1:
         return "< 1 hour (good first issue)"
     if effort < 0.35:

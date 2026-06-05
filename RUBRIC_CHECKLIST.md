@@ -44,7 +44,7 @@
 
 | Item | Status |
 |------|--------|
-| `brief.pdf` (3+ pages) | ✅ |
+| `brief.pdf` (4-page project brief) | ✅ |
 | `prompts.md` (updated) | ✅ |
 | `Prasad_Shivneel_BAX423_Final.zip` | ✅ |
 | Canvas upload | ⏳ user |

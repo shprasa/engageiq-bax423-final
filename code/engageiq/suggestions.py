@@ -50,7 +50,7 @@ def _template_suggestion(row: pd.Series, interest: str = "") -> str:
     focus = ", ".join(kws[:3])
 
     if src == "github":
-        stars = int(float(row.get("stars") or 0))
+        stars = _safe_int(row.get("stars"))
         if _safe_int(row.get("good_first_issue")) == 1:
             return (
                 f"For your {focus} goals: open \"{headline[:70]}\" in {community}, "
@@ -63,7 +63,7 @@ def _template_suggestion(row: pd.Series, interest: str = "") -> str:
             f"({stars:,} stars — prioritize active threads with maintainer replies)."
         )
     if src == "gharchive":
-        com = int(float(row.get("comments") or 0))
+        com = _safe_int(row.get("comments"))
         return (
             f"For your {focus} goals: open \"{headline[:70]}\" on {community}, "
             f"read the issue/PR context ({com:,} comments), then leave a helpful comment "
