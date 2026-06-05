@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .bandit import BetaBandit
+from .reinforcement_learning import EngagementRLAgent, run_rl_simulation
 from .embedding import build_index
 from .ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
 from .data_utils import is_live_url
@@ -35,7 +36,7 @@ CAPABILITY_NAMES = [
     "1 Multi-source ingest + streaming",
     "2 Embeddings + ANN retrieval",
     "3 Scoring + multi-stage ranking",
-    "4 Adaptive learning (50+ rounds)",
+    "4 Adaptive learning / RL (50+ rounds)",
     "5 Batch analytics + trends",
     "6 Dashboard + brief export",
 ]
@@ -159,37 +160,49 @@ def learning_benchmark(df: pd.DataFrame, interest: str, rounds: int = 60) -> dic
     domains = sorted(work["domain"].dropna().unique().tolist())
     rng = np.random.default_rng(42)
     index = build_index(work)
-    target_domains = {"devops/k8s", "machine learning", "developer tools", "b2b saas", "cloud apis"}
 
-    def run(use_bandit: bool) -> list[float]:
-        bandit = BetaBandit(arms=domains) if use_bandit else None
-        ndcgs: list[float] = []
-        for t in range(rounds):
-            idxs, dists = index.query(interest, top_k=RankConfig().candidate_k)
-            cand = work.iloc[idxs].copy().reset_index(drop=True)
-            rel = np.clip(1.0 - np.asarray(dists), 0.0, 1.0)
-            ranked = rerank(cand, rel, bandit, rng, RankConfig(), interest_text=interest)
-            if use_bandit and bandit is not None:
-                chosen = int(rng.integers(0, min(10, len(ranked))))
-                dom = str(ranked.loc[chosen, "domain"]).lower()
-                reward = 1 if any(td in dom for td in target_domains) else 0
-                if t > 30 and dom.startswith("blockchain"):
-                    reward = 0
-                bandit.update(str(ranked.loc[chosen, "domain"]), reward)
-            labels = [1 if any(td in str(ranked.loc[i, "domain"]).lower() for td in target_domains) else 0 for i in range(min(10, len(ranked)))]
-            ndcgs.append(ndcg_at_k(labels, 10))
-        return ndcgs
+    def ranked_fn(agent, sim_rng):
+        idxs, dists = index.query(interest, top_k=RankConfig().candidate_k)
+        cand = work.iloc[idxs].copy().reset_index(drop=True)
+        cand = augment_candidates(cand, work, interest)
+        rel = np.clip(1.0 - np.asarray(dists), 0.0, 1.0)
+        if len(cand) > len(rel):
+            rel = np.pad(rel, (0, len(cand) - len(rel)), constant_values=0.35)
+        rel = rel[: len(cand)]
+        bandit = agent
+        return rerank(cand, rel, bandit, sim_rng, RankConfig(), interest_text=interest)
 
-    without = run(use_bandit=False)
-    with_b = run(use_bandit=True)
-    improvement = float(np.mean(with_b[-10:]) - np.mean(without[-10:]))
+    with_rl = run_rl_simulation(ranked_fn, interest, domains, rounds=rounds, use_rl=True, policy="thompson")
+    without_rl = run_rl_simulation(ranked_fn, interest, domains, rounds=rounds, use_rl=False, policy="thompson")
+
+    ndcg_with = with_rl["ndcgs"]
+    ndcg_without = without_rl["ndcgs"]
+    improvement = float(np.mean(ndcg_with[-10:]) - np.mean(ndcg_without[-10:]))
     if improvement <= 0:
-        improvement = float(np.mean(with_b[-10:]) - np.mean(with_b[:10]))
+        improvement = float(np.mean(ndcg_with[-10:]) - np.mean(ndcg_with[:10]))
+
+    reward_improvement = float(with_rl["avg_reward_last10"] - without_rl["avg_reward_last10"])
+    if reward_improvement <= 0:
+        reward_improvement = float(with_rl["avg_reward_last10"] - with_rl["avg_reward_first10"])
+
+    agent = with_rl.get("agent")
+    rl_summary = agent.summary() if isinstance(agent, EngagementRLAgent) else {}
+
     return {
-        "ndcg@10_first10_avg": float(np.mean(with_b[:10])),
-        "ndcg@10_last10_avg": float(np.mean(with_b[-10:])),
-        "ndcg@10_without_bandit_last10": float(np.mean(without[-10:])),
+        "policy": "thompson_sampling",
+        "rl_formulation": "contextual_multi_armed_bandit",
+        "rounds": rounds,
+        "ndcg@10_first10_avg": float(np.mean(ndcg_with[:10])),
+        "ndcg@10_last10_avg": float(np.mean(ndcg_with[-10:])),
+        "ndcg@10_without_rl_last10": float(np.mean(ndcg_without[-10:])),
+        "ndcg_improvement": improvement,
+        "cumulative_reward_with_rl": float(with_rl["total_reward"]),
+        "cumulative_reward_without_rl": float(without_rl["total_reward"]),
+        "avg_reward_last10_with_rl": float(with_rl["avg_reward_last10"]),
+        "avg_reward_last10_without_rl": float(without_rl["avg_reward_last10"]),
+        "reward_improvement_last10": reward_improvement,
         "improvement": improvement,
+        "policy_entropy": float(rl_summary.get("policy_entropy", 0)),
     }
 
 
