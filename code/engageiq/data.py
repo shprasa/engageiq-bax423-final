@@ -11,7 +11,7 @@ import pandas as pd
 from .data_utils import is_live_url, live_mask, sort_live_first
 
 
-Source = Literal["github", "reddit", "hackernews"]
+Source = Literal["github", "hackernews"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS opportunities (
