@@ -23,21 +23,82 @@ def sort_live_first(df: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
-def ranking_corpus(df: pd.DataFrame, live_only: bool = True) -> pd.DataFrame:
+def ranking_corpus(df: pd.DataFrame, live_only: bool = True, english_only: bool = True) -> pd.DataFrame:
+    out = df
     if live_only:
-        live = df[live_mask(df)]
+        live = out[live_mask(out)]
         if len(live) >= 100:
-            return live.reset_index(drop=True)
-    return df.reset_index(drop=True)
+            out = live.reset_index(drop=True)
+        else:
+            out = out.reset_index(drop=True)
+    else:
+        out = out.reset_index(drop=True)
+    if english_only:
+        eng = out[english_mask(out)]
+        if len(eng) >= 100:
+            out = eng.reset_index(drop=True)
+    return out
 
 
 def excerpt(text: str, max_len: int = 320) -> str:
-    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    raw = strip_markdown(str(text or ""))
+    raw = re.sub(r"\s+", " ", raw).strip()
     if not raw or raw.lower().startswith("looking for insights on"):
         return ""
     if len(raw) <= max_len:
         return raw
     return raw[: max_len - 1].rsplit(" ", 1)[0] + "…"
+
+
+def strip_markdown(text: str) -> str:
+    """Flatten markdown so Streamlit does not render issue bodies as giant headings."""
+    raw = str(text or "")
+    raw = re.sub(r"^#{1,6}\s+", "", raw, flags=re.MULTILINE)
+    raw = re.sub(r"\s#{1,6}\s+", " · ", raw)
+    raw = re.sub(r"\*\*([^*]+)\*\*", r"\1", raw)
+    raw = re.sub(r"\*([^*]+)\*", r"\1", raw)
+    raw = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", raw)
+    raw = re.sub(r"`([^`]+)`", r"\1", raw)
+    raw = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", raw)
+    raw = re.sub(r"^>\s+", "", raw, flags=re.MULTILINE)
+    raw = re.sub(r"^[-*]\s+", "", raw, flags=re.MULTILINE)
+    return raw.strip()
+
+
+_NON_LATIN = re.compile(
+    r"[\u0400-\u04FF\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF"
+    r"\u0600-\u06FF\u0900-\u097F\uAC00-\uD7AF\u0E00-\u0E7F]"
+)
+
+
+def is_likely_english(text: str, min_ratio: float = 0.82) -> bool:
+    sample = strip_markdown(str(text or ""))[:500].strip()
+    if not sample:
+        return True
+    if len(_NON_LATIN.findall(sample)) >= 2:
+        return False
+    letters = [c for c in sample if c.isalpha()]
+    if not letters:
+        return True
+    latin = sum(1 for c in letters if ord(c) < 128)
+    return (latin / len(letters)) >= min_ratio
+
+
+def row_is_english(row: pd.Series) -> bool:
+    title = str(row.get("title") or "")
+    body = str(row.get("text") or "")
+    return is_likely_english(f"{title}\n{body}")
+
+
+def english_mask(df: pd.DataFrame) -> pd.Series:
+    return df.apply(row_is_english, axis=1)
+
+
+def _clean_lang(value) -> str:
+    lang = str(value or "").strip()
+    if not lang or lang.lower() in ("nan", "none", "null"):
+        return ""
+    return lang
 
 
 def format_created(value) -> str:
@@ -142,7 +203,7 @@ def display_subtitle(row: pd.Series) -> str:
             parts.append(community)
         if author:
             parts.append(f"maintainer {author}")
-        lang = str(row.get("lang") or "").strip()
+        lang = _clean_lang(row.get("lang"))
         if lang:
             parts.append(lang)
         return " · ".join(parts) if parts else "Open-source project on GitHub"
@@ -220,7 +281,7 @@ def decision_facts(row: pd.Series) -> list[tuple[str, str]]:
             facts.append(("Forks", f"{int(float(row['forks'])):,}"))
         if _has_value(row.get("issues_open")):
             facts.append(("Open issues", f"{int(float(row['issues_open'])):,}"))
-        lang = str(row.get("lang") or "").strip()
+        lang = _clean_lang(row.get("lang"))
         if lang:
             facts.append(("Language", lang))
         if _safe_int(row.get("good_first_issue")) == 1:
@@ -265,5 +326,9 @@ def describe_opportunity(row: pd.Series) -> str:
     return display_summary(row)
 
 
-def escape_html(text: str) -> str:
-    return html.escape(str(text or ""), quote=True)
+def escape_markdown(text: str) -> str:
+    """Escape characters that Streamlit markdown treats as formatting."""
+    s = str(text or "")
+    for ch in ("\\", "*", "_", "`", "#", "[", "]"):
+        s = s.replace(ch, f"\\{ch}")
+    return s
