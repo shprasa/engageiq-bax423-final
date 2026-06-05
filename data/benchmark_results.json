@@ -21,21 +21,21 @@
   "personas": [
     {
       "persona": "Sofia (ML Student / Portfolio Builder)",
-      "ndcg10": 1.0,
-      "top10_github_gfi": 0,
+      "ndcg10": 0.9326888191250972,
+      "top10_github_gfi": 7,
       "top10_cpp_rust": 0,
       "top10_ml_hits": 10,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 0,
-      "pass_sofia": false,
+      "pass_sofia": true,
       "pass_david": false,
       "pass_lina": true,
       "pass_raj": false,
       "capability_pass": {
         "1 Multi-source ingest + streaming": "PASS",
         "2 Embeddings + ANN retrieval": "PASS",
-        "3 Scoring + multi-stage ranking": "PARTIAL",
-        "4 Adaptive learning / RL (50+ rounds)": "PARTIAL",
+        "3 Scoring + multi-stage ranking": "PASS",
+        "4 Adaptive learning / RL (50+ rounds)": "PASS",
         "5 Batch analytics + trends": "PASS",
         "6 Dashboard + brief export": "PASS"
       }
@@ -56,7 +56,7 @@
         "1 Multi-source ingest + streaming": "PASS",
         "2 Embeddings + ANN retrieval": "PASS",
         "3 Scoring + multi-stage ranking": "PASS",
-        "4 Adaptive learning / RL (50+ rounds)": "PARTIAL",
+        "4 Adaptive learning / RL (50+ rounds)": "PASS",
         "5 Batch analytics + trends": "PASS",
         "6 Dashboard + brief export": "PASS"
       }
@@ -77,7 +77,7 @@
         "1 Multi-source ingest + streaming": "PASS",
         "2 Embeddings + ANN retrieval": "PASS",
         "3 Scoring + multi-stage ranking": "PASS",
-        "4 Adaptive learning / RL (50+ rounds)": "PARTIAL",
+        "4 Adaptive learning / RL (50+ rounds)": "PASS",
         "5 Batch analytics + trends": "PASS",
         "6 Dashboard + brief export": "PASS"
       }
@@ -98,7 +98,7 @@
         "1 Multi-source ingest + streaming": "PASS",
         "2 Embeddings + ANN retrieval": "PASS",
         "3 Scoring + multi-stage ranking": "PASS",
-        "4 Adaptive learning / RL (50+ rounds)": "PARTIAL",
+        "4 Adaptive learning / RL (50+ rounds)": "PASS",
         "5 Batch analytics + trends": "PASS",
         "6 Dashboard + brief export": "PASS"
       }
@@ -108,16 +108,16 @@
     "policy": "thompson_sampling",
     "rl_formulation": "contextual_multi_armed_bandit",
     "rounds": 60,
-    "ndcg@10_first10_avg": 1.0,
+    "ndcg@10_first10_avg": 0.997484593625304,
     "ndcg@10_last10_avg": 1.0,
     "ndcg@10_without_rl_last10": 1.0,
-    "ndcg_improvement": 0.0,
+    "ndcg_improvement": 0.0025154063746960498,
     "cumulative_reward_with_rl": 60.0,
     "cumulative_reward_without_rl": 60.0,
     "avg_reward_last10_with_rl": 1.0,
     "avg_reward_last10_without_rl": 1.0,
     "reward_improvement_last10": 0.0,
-    "improvement": 0.0,
-    "policy_entropy": 2.686
+    "improvement": 0.0025154063746960498,
+    "policy_entropy": 2.687
   }
 }
