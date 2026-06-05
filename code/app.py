@@ -98,7 +98,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 6}
+    return store, {"paths": paths, "version": 7}
 
 
 @st.cache_resource
@@ -189,9 +189,10 @@ def _rank_opportunities(
     interest_text: str,
     version: int,
     live_only: bool,
+    english_only: bool = True,
 ) -> pd.DataFrame:
-    corpus = ranking_corpus(df, live_only=live_only)
-    corpus_key = f"{len(corpus)}_{live_only}_{hash(tuple(corpus['id'].head(5).tolist()))}"
+    corpus = ranking_corpus(df, live_only=live_only, english_only=english_only)
+    corpus_key = f"{len(corpus)}_{live_only}_{english_only}_{hash(tuple(corpus['id'].head(5).tolist()))}"
     index = _build_embedding_index(version, corpus_key, corpus)
     q = interest_text.strip()
     if user.liked_texts:
@@ -292,6 +293,11 @@ def main() -> None:
             value=True,
             help="When on, rankings use real GitHub/HN URLs. Turn off to include offline backup records.",
         )
+        english_only = st.toggle(
+            "English only",
+            value=True,
+            help="Hide opportunities whose title and description appear to be non-English.",
+        )
 
         st.markdown("**Reinforcement learning**")
         render_rl_policy(user.rl_agent)
@@ -343,7 +349,7 @@ def main() -> None:
         ["🔍 Discover", "★ Bookmarks", "📋 Activity Log", "🧠 RL Policy", "📈 Analytics"]
     )
 
-    ranked = _rank_opportunities(df, user, user.interest_text, version, live_only)
+    ranked = _rank_opportunities(df, user, user.interest_text, version, live_only, english_only)
 
     domain_tokens = [w.strip() for w in user.interest_text.split(",") if w.strip()]
     labels = [
@@ -358,12 +364,22 @@ def main() -> None:
         c1.markdown(f"**Personalized opportunities** for `{persona.split('(')[0].strip()}`")
         c2.metric("NDCG@10", f"{ndcg_val:.3f}")
         c3.metric("Live in top-20", live_in_results)
-        c4.metric("Showing", "Live only" if live_only else "All data")
+        showing = []
+        if live_only:
+            showing.append("Live only")
+        else:
+            showing.append("All data")
+        if english_only:
+            showing.append("English")
+        c4.metric("Showing", " · ".join(showing))
 
         if live_only and live_n == 0:
             st.warning("No live API rows loaded. Data file missing on server — check code/data/live_opportunities.csv.")
         elif live_only:
-            st.caption("Real GitHub repos and Hacker News threads with descriptions and clickable links.")
+            st.caption(
+                "Real GitHub repos and Hacker News threads. Summaries are plain text; "
+                "toggle off English only in the sidebar to include other languages."
+            )
 
         for i, row in ranked.iterrows():
             render_opportunity_card(
