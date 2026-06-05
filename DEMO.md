@@ -6,9 +6,10 @@
 EngageIQ helps professionals decide *where* to invest limited time online — ranking engagement opportunities from GitHub and Hacker News by relevance, community health, visibility, and effort.
 
 ## 2. Data pipeline (2 min)
-- Show **11,964-record offline snapshot** (1,964 live GitHub + HN + synthetic backup)
-- Click **Ingest next streaming batch** → simulated streaming
-- Show **Bloom/CMS/HLL sketch metrics** → dedup + trend counting (BAX-423 sketching)
+- Show **10,000-record snapshot** (1,964 live GitHub + HN)
+- Sidebar **Streaming pipeline**: click **1 · Produce batch** then **2 · Consume (dedup → store)**
+- Point out dedup counters + **Bloom/CMS/HLL sketch metrics**
+- Optional: enable **Try Kafka publish** if Docker Kafka is running locally
 
 ## 3. Embeddings + ranking (2 min)
 - Select persona **Sofia (ML Student)** → Load profile
@@ -16,8 +17,8 @@ EngageIQ helps professionals decide *where* to invest limited time online — ra
 - Point out **NDCG@10** metric in UI
 
 ## 4. Adaptive learning (1 min)
-- Click **Run simulation** (60 rounds) → show NDCG improvement
-- Click **Engage / Skip** on one card → bandit updates domain weights
+- Open **RL Policy** tab → click **Run RL benchmark** → show **+0.7 reward improvement** vs random
+- Click **Engage / Skip** on a card → bandit updates domain weights in sidebar
 
 ## 5. Batch analytics (1 min)
 - Scroll to **trend charts** + **week-over-week rising domains** (Lina persona)
