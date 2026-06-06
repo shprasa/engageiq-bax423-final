@@ -14,6 +14,7 @@ from engageiq.config import get_paths
 from engageiq.data_utils import live_mask
 from engageiq.scrape_github import scrape_github
 from engageiq.scrape_gharchive import scrape_gharchive
+from engageiq.snapshot_ops import write_snapshot_everywhere
 
 SOURCES = ("github", "gharchive")
 
@@ -132,8 +133,9 @@ def build_snapshot(
     print("Live rows only:", int(live_mask(df).sum()), f"/ {len(df)}")
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out_csv, index=False)
-    print(f"Wrote {len(df):,} live rows -> {out_csv}")
+    paths = get_paths()
+    write_snapshot_everywhere(df, paths)
+    print(f"Wrote {len(df):,} live rows -> {out_csv} (+ synced code/data/ for Streamlit Cloud)")
     return df
 
 
