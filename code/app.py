@@ -29,7 +29,18 @@ from engageiq.data_utils import (
 )
 from engageiq.domains import DOMAINS
 from engageiq.embedding import build_index
-from engageiq.personas import BUILTIN_PERSONAS, CUSTOM_SENTINEL
+from engageiq.personas import (
+    BUILTIN_PROFILES,
+    BUILTIN_PERSONAS,
+    CUSTOM_SENTINEL,
+    PROFILE_FIELD_LABELS,
+    PROFILE_FIELDS,
+    PROFILE_WIDGET_KEYS,
+    UserProfile,
+    apply_profile_to_session,
+    profile_to_interest_text,
+    read_profile_from_session,
+)
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, profile_match_pct, rerank
 from engageiq.reinforcement_learning import EngagementRLAgent
 from engageiq.snapshot_ops import merge_live_refresh
@@ -98,7 +109,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 15}
+    return store, {"paths": paths, "version": 16}
 
 
 @st.cache_resource
@@ -107,16 +118,34 @@ def _build_embedding_index(_version: int, corpus_key: str, df: pd.DataFrame):
 
 
 def _init_user_state(domains: list[str]) -> UserState:
+    first = next(iter(BUILTIN_PROFILES))
     return UserState(
-        interest_text=BUILTIN_PERSONAS["Sofia (ML Student / Portfolio Builder)"],
+        interest_text=BUILTIN_PERSONAS[first],
         liked_texts=[],
         rl_agent=EngagementRLAgent(arms=domains, policy="thompson"),
         rng=np.random.default_rng(42),
     )
 
 
-def _persona_catalog() -> dict[str, str]:
-    return {**BUILTIN_PERSONAS, **st.session_state.get("custom_personas", {})}
+def _normalize_custom_profile(raw: str | dict) -> dict[str, str]:
+    if isinstance(raw, dict):
+        return UserProfile.from_dict(raw).to_dict()
+    text = str(raw or "").strip()
+    return UserProfile(
+        background="",
+        interests=text,
+        goal="",
+        platforms="",
+        time_budget="",
+    ).to_dict()
+
+
+def _persona_catalog() -> dict[str, UserProfile]:
+    custom = {
+        name: UserProfile.from_dict(_normalize_custom_profile(raw))
+        for name, raw in st.session_state.get("custom_personas", {}).items()
+    }
+    return {**BUILTIN_PROFILES, **custom}
 
 
 def _persona_option_labels() -> list[str]:
@@ -130,18 +159,25 @@ def _on_persona_select_change() -> None:
     catalog = _persona_catalog()
     if selected not in catalog:
         return
-    preset = catalog[selected]
-    st.session_state.interest_text_editor = preset
+    apply_profile_to_session(st.session_state, catalog[selected])
     if "user_state" in st.session_state:
-        st.session_state.user_state.interest_text = preset
+        st.session_state.user_state.interest_text = profile_to_interest_text(catalog[selected])
     st.session_state.suggestion_cache = {}
 
 
-def _ensure_interest_editor(user: UserState) -> None:
-    if "interest_text_editor" not in st.session_state:
-        st.session_state.interest_text_editor = user.interest_text
+def _ensure_profile_widgets(user: UserState) -> None:
     if "persona_select" not in st.session_state:
         st.session_state.persona_select = _persona_option_labels()[0]
+    if not any(st.session_state.get(PROFILE_WIDGET_KEYS[field]) for field in PROFILE_FIELDS):
+        first = next(iter(BUILTIN_PROFILES))
+        apply_profile_to_session(st.session_state, BUILTIN_PROFILES[first])
+        user.interest_text = BUILTIN_PERSONAS[first]
+
+
+def _sync_user_interest_text(user: UserState) -> str:
+    profile = read_profile_from_session(st.session_state)
+    user.interest_text = profile_to_interest_text(profile)
+    return user.interest_text
 
 
 def _profile_display_name(selected: str) -> str:
@@ -307,35 +343,38 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("**Profile & interests**")
-        _ensure_interest_editor(user)
+        _ensure_profile_widgets(user)
         profile_options = _persona_option_labels()
         st.selectbox(
             "Profile preset",
             options=profile_options,
             key="persona_select",
             on_change=_on_persona_select_change,
-            help="Choosing a preset fills the interest box below. Pick Custom to write your own.",
+            help="Built-in personas use the official course profile tables. Choose Custom to write your own.",
         )
         selected_profile = st.session_state.persona_select
 
-        user.interest_text = st.text_area(
-            "Describe what you want to engage with",
-            height=120,
-            label_visibility="collapsed",
-            key="interest_text_editor",
-        )
+        st.caption("Fill out all five fields — ranking uses the full profile, not a single interest line.")
+        for field in PROFILE_FIELDS:
+            st.text_area(
+                PROFILE_FIELD_LABELS[field],
+                height=72 if field != "goal" else 88,
+                key=PROFILE_WIDGET_KEYS[field],
+            )
+
+        interest_text = _sync_user_interest_text(user)
 
         with st.expander("Save a custom profile"):
             custom_name = st.text_input("Profile name", placeholder="e.g. Security researcher")
             c_save, c_del = st.columns(2)
-            if c_save.button("Save current interests", use_container_width=True):
+            if c_save.button("Save current profile", use_container_width=True):
                 name = custom_name.strip()
                 if not name:
                     st.warning("Enter a profile name first.")
-                elif name in BUILTIN_PERSONAS:
+                elif name in BUILTIN_PROFILES:
                     st.warning("That name is reserved for a built-in course persona.")
                 else:
-                    st.session_state.custom_personas[name] = user.interest_text.strip()
+                    st.session_state.custom_personas[name] = read_profile_from_session(st.session_state).to_dict()
                     st.session_state.persona_select = name
                     st.success(f"Saved profile: {name}")
                     st.rerun()
@@ -343,10 +382,9 @@ def main() -> None:
                 if selected_profile in st.session_state.get("custom_personas", {}):
                     del st.session_state.custom_personas[selected_profile]
                     first = profile_options[0]
-                    preset = BUILTIN_PERSONAS[first]
+                    apply_profile_to_session(st.session_state, BUILTIN_PROFILES[first])
                     st.session_state.persona_select = first
-                    st.session_state.interest_text_editor = preset
-                    user.interest_text = preset
+                    user.interest_text = BUILTIN_PERSONAS[first]
                     st.session_state.suggestion_cache = {}
                     st.rerun()
                 else:
@@ -449,9 +487,9 @@ def main() -> None:
         ["Discover", "Bookmarks", "Activity", "Analytics"]
     )
 
-    ranked = _rank_opportunities(df, user, user.interest_text, version, use_live_snapshot, english_only)
+    ranked = _rank_opportunities(df, user, interest_text, version, use_live_snapshot, english_only)
 
-    domain_tokens = [w.strip() for w in user.interest_text.split(",") if w.strip()]
+    domain_tokens = [w.strip() for w in interest_text.split(",") if w.strip()]
     labels = [
         1 if any(tok.lower() in str(ranked.loc[i, "domain"]).lower() for tok in domain_tokens) else 0
         for i in range(min(10, len(ranked)))
@@ -470,7 +508,8 @@ def main() -> None:
         st.caption(dataset_pool_summary(df, use_live_snapshot_pool=use_live_snapshot))
         st.markdown(
             '<div class="discover-help-box">'
-            "<strong>How this works:</strong> Pick a profile or write custom interests in the sidebar. "
+            "<strong>How this works:</strong> Pick a built-in persona or fill in the five profile fields "
+            "(background, interests, goal, platforms, time budget) in the sidebar. "
             "Each card is one saved opportunity from the bundled dataset. "
             "<strong>Engage / Bookmark / Skip</strong> logs one action, removes the card, updates RL ranking, "
             "and refreshes the feed. Use <strong>Refresh live API data now</strong> in the sidebar to fetch new rows "
@@ -597,7 +636,7 @@ def main() -> None:
                     rank=rank_idx,
                     row=row,
                     explain=_explain_row(row),
-                    suggest=_suggest_action(row, user.interest_text),
+                    suggest=_suggest_action(row, interest_text),
                     key_prefix="disc",
                     use_live_snapshot_pool=use_live_snapshot,
                 )
@@ -690,7 +729,7 @@ def main() -> None:
         if st.button("Run RL benchmark", use_container_width=True, key="rl_bench"):
             from engageiq.persona_eval import learning_benchmark
 
-            st.session_state._last_rl_bench = learning_benchmark(df, user.interest_text, rounds=60)
+            st.session_state._last_rl_bench = learning_benchmark(df, interest_text, rounds=60)
         if st.session_state.get("_last_rl_bench"):
             lb = st.session_state._last_rl_bench
             r1, r2, r3, r4 = st.columns(4)

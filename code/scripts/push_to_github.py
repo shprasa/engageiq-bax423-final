@@ -26,7 +26,7 @@ from engageiq.secrets import load_env
 OWNER = "shprasa"
 REPO = "engageiq-bax423-final"
 BRANCH = "main"
-COMMIT_MSG = "Fix 0% interest match display for Lina and David personas"
+COMMIT_MSG = "Structured profile fields (background, interests, goal, platforms, time budget)"
 
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "_tmp_engageiq_docx", ".cursor"}
 SKIP_NAMES = {".env", "engageiq.duckdb", "engageiq.duckdb.wal", "Thumbs.db", ".DS_Store"}
