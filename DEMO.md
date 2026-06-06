@@ -6,7 +6,7 @@
 EngageIQ helps professionals decide *where* to invest limited time online — ranking engagement opportunities from the **GitHub API** and **GitHub Archive** by relevance, community health, visibility, and effort.
 
 ## 2. Data + ingest (1 min)
-- Show **10,944-record snapshot** (2,908 live: GitHub API + GH Archive, **15 domains**)
+- Show **12,750-record snapshot** (100% live: GitHub API + GitHub Archive, **15 domains**)
 - Mention multi-source ingest with URL dedup into DuckDB
 
 ## 3. Recommendation system (2 min)
@@ -25,7 +25,7 @@ EngageIQ helps professionals decide *where* to invest limited time online — ra
 
 ## 6. Personas (2 min)
 - Switch to **David (DevOps)** → infra-focused top-10
-- Mention **4 personas** + 6-capability pass table in `brief.pdf`
+- Mention **4 personas** + 6-capability pass table in `brief.docx`
 
 ## 7. Wrap-up (30 sec)
 - **Two BAX-423 techniques:** recommendation (embeddings + ranking) + RL bandit
