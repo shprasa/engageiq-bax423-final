@@ -26,10 +26,10 @@
 
 | Item | Status |
 |------|--------|
-| ≥10,000 rows | ✅ (10,944) |
+| ≥10,000 rows | ✅ (12,750) |
 | 15/15 domains | ✅ |
 | GitHub API + GitHub Archive | ✅ |
-| 2,908 live rows (2,000 GH Archive + 908 GitHub API) | ✅ |
+| 100% live API URLs (no synthetic padding) | ✅ |
 
 ## Personas
 
@@ -44,8 +44,8 @@
 
 | Item | Status |
 |------|--------|
-| `brief.pdf` (4-page project brief) | ✅ |
-| `prompts.md` (updated) | ✅ |
+| `brief.docx` (technical brief) | ✅ |
+| `prompts.md` (v3 development prompts) | ✅ |
 | `Prasad_Shivneel_BAX423_Final.zip` | ✅ |
 | Canvas upload | ⏳ user |
 | Saturday demo | ⏳ user |
