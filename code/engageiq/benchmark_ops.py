@@ -28,13 +28,17 @@ def run_and_write_benchmarks(
     payload = build_benchmark_payload(df, custom_profiles_path=custom_path)
     out = benchmark_results_path(paths)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    # Keep project data/ in sync when saving from code/ locally
-    if not paths.is_cloud:
-        alt = paths.project_root / "data" / "benchmark_results.json"
+    text = json.dumps(payload, indent=2)
+    out.write_text(text, encoding="utf-8")
+    # Keep project data/ and code/data/ in sync (Streamlit Cloud reads code/data/).
+    sync_paths = {
+        paths.project_root / "data" / "benchmark_results.json",
+        paths.code_dir / "data" / "benchmark_results.json",
+    }
+    for alt in sync_paths:
         if alt.resolve() != out.resolve():
             alt.parent.mkdir(parents=True, exist_ok=True)
-            alt.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            alt.write_text(text, encoding="utf-8")
     return payload
 
 
