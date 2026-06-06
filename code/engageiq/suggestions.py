@@ -15,7 +15,7 @@ try:
 except ImportError:
     pass
 
-from .data_utils import _safe_int, display_summary, display_title
+from .data_utils import _is_github_issue, _safe_int, display_summary, display_title
 from .secrets import load_env
 
 _LAST_PROVIDER: str = "template"
@@ -40,38 +40,53 @@ def _interest_keywords(interest: str, limit: int = 4) -> list[str]:
     return out
 
 
+def _issue_ref(url: str) -> str:
+    url = url.rstrip("/")
+    if "/issues/" in url:
+        return f"issue #{url.split('/issues/')[-1].split('/')[0]}"
+    if "/pull/" in url:
+        return f"PR #{url.split('/pull/')[-1].split('/')[0]}"
+    return "this thread"
+
+
 def _template_suggestion(row: pd.Series, interest: str = "") -> str:
     """Interest-aware rule-based plan — no API cost, always available."""
     src = str(row.get("source", "")).lower()
     headline = display_title(row)
-    community = str(row.get("community") or row.get("domain") or "")
+    community = str(row.get("community") or row.get("domain") or "this community")
     domain = str(row.get("domain") or "")
+    url = str(row.get("url") or "")
+    summary = display_summary(row)[:100].strip()
     kws = _interest_keywords(interest) or [domain.split("/")[0].lower()]
-    focus = ", ".join(kws[:3])
+    focus = kws[0]
 
     if src == "github":
         stars = _safe_int(row.get("stars"))
-        if _safe_int(row.get("good_first_issue")) == 1:
+        gfi = _safe_int(row.get("good_first_issue")) == 1
+        if gfi or _is_github_issue(row):
+            hint = summary or headline[:80]
+            ref = _issue_ref(url)
             return (
-                f"For your {focus} goals: open \"{headline[:70]}\" in {community}, "
-                "ask one clarifying question on the issue, then ship a small PR "
-                "(docs, test, or typo fix) within an hour."
+                f"Start with \"{headline[:62]}\" ({community}, {ref}): read the thread"
+                f"{f' — {hint}…' if hint else ''}, post one clarifying question, "
+                f"then open a small docs/tests PR that closes or references {ref}."
             )
         return (
-            f"Aligned with {focus}: skim {community}'s README and the 5 most recent issues, "
-            f"pick a docs/test issue matching {domain}, and open a PR describing your change "
-            f"({stars:,} stars — prioritize active threads with maintainer replies)."
+            f"Explore {community} ({domain}, {stars:,}★): clone the repo, read CONTRIBUTING.md, "
+            f"and use \"{headline[:52]}\" as your entry point — pick a {focus}-related docs or "
+            "test issue and open a PR with a one-paragraph maintainer note."
         )
     if src == "gharchive":
         com = _safe_int(row.get("comments"))
+        kind = "issue thread" if "/issues/" in url else ("PR thread" if "/pull/" in url else "timeline event")
         return (
-            f"For your {focus} goals: open \"{headline[:70]}\" on {community}, "
-            f"read the issue/PR context ({com:,} comments), then leave a helpful comment "
-            "or open a small follow-up PR linked to the thread."
+            f"Archive {kind}: \"{headline[:58]}\" on {community} ({com:,} comments, {domain}). "
+            f"Open the live URL, scan the last 5 comments for {focus} context, and reply with "
+            f"one concrete suggestion or link a minimal follow-up PR for {_issue_ref(url)}."
         )
     return (
-        f"Review \"{headline[:70]}\" against your {focus} profile in {domain}; "
-        "engage only if you can add a specific comment or contribution within your time budget."
+        f"Check \"{headline[:65]}\" ({domain}): only engage if it advances your {focus} goals — "
+        "leave one specific comment or contribution, not a generic star/follow."
     )
 
 
@@ -197,16 +212,27 @@ def _build_prompt(row: pd.Series, interest: str) -> str:
     summary = display_summary(row)[:500]
     src = str(row.get("source", ""))
     domain = str(row.get("domain", ""))
+    community = str(row.get("community") or "")
+    stars = _safe_int(row.get("stars"))
     return (
         "You are an engagement coach. Given this opportunity and user interest profile, "
-        "write ONE specific 2–3 sentence action plan (what to read, write, or contribute).\n\n"
+        "write ONE specific 2–3 sentence action plan (what to read, write, or contribute). "
+        "You MUST name the opportunity title or repo/community in the first sentence. "
+        "Do not use generic filler like 'looking for insights'.\n\n"
         f"User interests: {interest[:400]}\n"
-        f"Source: {src}\nDomain: {domain}\nTitle: {headline}\nSummary: {summary}\n"
+        f"Source: {src}\nDomain: {domain}\nCommunity: {community}\nStars: {stars}\n"
+        f"Title: {headline}\nSummary: {summary}\n"
     )
 
 
+def _suggestion_cache_key(row: pd.Series, interest: str) -> str:
+    rid = str(row.get("id", row.get("url", "")))
+    profile = (interest or "").strip()[:160]
+    return f"{rid}|{hash(profile)}"
+
+
 def generate_suggestion(row: pd.Series, interest: str = "", cache: dict[str, str] | None = None) -> str:
-    key = str(row.get("id", row.get("url", "")))
+    key = _suggestion_cache_key(row, interest)
     if cache is not None and key in cache:
         return cache[key]
 

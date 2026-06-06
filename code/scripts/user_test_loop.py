@@ -338,6 +338,7 @@ def check_suggest_action(report: Report, df: pd.DataFrame) -> None:
     from engageiq.suggestions import generate_suggestion
 
     live = df[live_mask(df)]
+    seen: set[str] = set()
     for src in ("github", "gharchive"):
         sample = live[live["source"] == src].head(3)
         for _, row in sample.iterrows():
@@ -348,6 +349,11 @@ def check_suggest_action(report: Report, df: pd.DataFrame) -> None:
             if "looking for insights" in suggestion.lower():
                 _fail(report, name, f"{src} id={row['id']}: generic suggestion")
                 return
+            sig = suggestion[:72]
+            if sig in seen:
+                _fail(report, name, f"{src} id={row['id']}: duplicate suggestion opener")
+                return
+            seen.add(sig)
     _pass(report, name)
 
 

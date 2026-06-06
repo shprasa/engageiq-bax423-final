@@ -98,7 +98,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 14}
+    return store, {"paths": paths, "version": 15}
 
 
 @st.cache_resource
@@ -124,19 +124,24 @@ def _persona_option_labels() -> list[str]:
     return list(BUILTIN_PERSONAS.keys()) + custom + [CUSTOM_SENTINEL]
 
 
-def _sync_profile_from_selection(user: UserState) -> str:
-    """When the profile dropdown changes, copy preset interests into the editor."""
-    options = _persona_option_labels()
-    if "persona_select" not in st.session_state:
-        st.session_state.persona_select = options[0]
+def _on_persona_select_change() -> None:
+    """Streamlit callback — preset selection must set widget state directly."""
     selected = st.session_state.persona_select
-    prev = st.session_state.get("_persona_prev")
     catalog = _persona_catalog()
-    if selected != prev and selected in catalog:
-        user.interest_text = catalog[selected]
-        st.session_state.pop("interest_text_editor", None)
-    st.session_state._persona_prev = selected
-    return selected
+    if selected not in catalog:
+        return
+    preset = catalog[selected]
+    st.session_state.interest_text_editor = preset
+    if "user_state" in st.session_state:
+        st.session_state.user_state.interest_text = preset
+    st.session_state.suggestion_cache = {}
+
+
+def _ensure_interest_editor(user: UserState) -> None:
+    if "interest_text_editor" not in st.session_state:
+        st.session_state.interest_text_editor = user.interest_text
+    if "persona_select" not in st.session_state:
+        st.session_state.persona_select = _persona_option_labels()[0]
 
 
 def _profile_display_name(selected: str) -> str:
@@ -301,18 +306,19 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("**Profile & interests**")
+        _ensure_interest_editor(user)
         profile_options = _persona_option_labels()
         st.selectbox(
             "Profile preset",
             options=profile_options,
             key="persona_select",
+            on_change=_on_persona_select_change,
             help="Choosing a preset fills the interest box below. Pick Custom to write your own.",
         )
-        selected_profile = _sync_profile_from_selection(user)
+        selected_profile = st.session_state.persona_select
 
         user.interest_text = st.text_area(
             "Describe what you want to engage with",
-            value=user.interest_text,
             height=120,
             label_visibility="collapsed",
             key="interest_text_editor",
@@ -330,15 +336,17 @@ def main() -> None:
                 else:
                     st.session_state.custom_personas[name] = user.interest_text.strip()
                     st.session_state.persona_select = name
-                    st.session_state._persona_prev = name
                     st.success(f"Saved profile: {name}")
                     st.rerun()
             if c_del.button("Delete custom profile", use_container_width=True):
                 if selected_profile in st.session_state.get("custom_personas", {}):
                     del st.session_state.custom_personas[selected_profile]
-                    st.session_state.persona_select = profile_options[0]
-                    st.session_state._persona_prev = profile_options[0]
-                    user.interest_text = BUILTIN_PERSONAS[profile_options[0]]
+                    first = profile_options[0]
+                    preset = BUILTIN_PERSONAS[first]
+                    st.session_state.persona_select = first
+                    st.session_state.interest_text_editor = preset
+                    user.interest_text = preset
+                    st.session_state.suggestion_cache = {}
                     st.rerun()
                 else:
                     st.info("Select a custom profile to delete.")
