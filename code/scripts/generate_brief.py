@@ -339,20 +339,35 @@ def build_brief(out_pdf: Path, bench_path: Path) -> None:
     )
 
     story.append(_p("<b>14. Validation results</b>", h2))
-    prow = [["Persona", "Top-10 check", "Result"]]
+    prow = [["Persona", "PDF pass criteria", "Result"]]
     for p in bench.get("personas", []):
+        if p.get("persona_type") == "custom":
+            continue
         short = p["persona"].split("(")[0].strip()
+        crit = p.get("pass_criteria") or {}
         if "Sofia" in p["persona"]:
-            meas = f"GFI {p['top10_github_gfi']}/10 · ML {p['top10_ml_hits']}/10 · no C++/Rust"
+            meas = (
+                f"GFI≥3 ({p['top10_github_gfi']}) · no C++/Rust · ML discussions · <1hr brief "
+                f"({sum(1 for v in crit.values() if v)}/{len(crit) or 4} checks)"
+            )
             ok = "PASS" if p["pass_sofia"] else "FAIL"
         elif "David" in p["persona"]:
-            meas = f"DevOps/K8s {p['top10_infra_hits']}/10"
+            meas = (
+                f"K8s/infra ({p['top10_infra_hits']}/10) · niche repos · discussion-oriented "
+                f"({sum(1 for v in crit.values() if v)}/{len(crit) or 3} checks)"
+            )
             ok = "PASS" if p["pass_david"] else "FAIL"
         elif "Lina" in p["persona"]:
-            meas = "Visibility ≥ relevance"
+            meas = (
+                "Recency/velocity > skill match · WoW analytics · rising in brief "
+                f"({sum(1 for v in crit.values() if v)}/{len(crit) or 3} checks)"
+            )
             ok = "PASS" if p["pass_lina"] else "FAIL"
         else:
-            meas = f"DevTools/B2B {p['top10_devtools_hits']}/10"
+            meas = (
+                f"DevTools ({p['top10_devtools_hits']}/10) · discussion threads · RL skip learning "
+                f"({sum(1 for v in crit.values() if v)}/{len(crit) or 3} checks)"
+            )
             ok = "PASS" if p["pass_raj"] else "FAIL"
         prow.append([short, meas, ok])
     story.append(_table(prow, [0.75 * inch, 4.85 * inch, 0.55 * inch], cell, cell_hdr))

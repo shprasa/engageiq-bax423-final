@@ -135,12 +135,16 @@ def augment_candidates(
         gh_niche = pool[
             (pool["source"].astype(str) == "github")
             & (pool["domain"].astype(str).str.contains("DevOps", case=False))
-            & (stars >= 500)
+            & (stars >= 200)
             & (stars <= 25000)
             & (~pool["url"].astype(str).isin(existing_urls))
         ]
         if not gh_niche.empty:
-            extras.append(gh_niche.head(max_extra // 3))
+            forks = gh_niche["forks"].fillna(0).astype(float)
+            st = gh_niche["stars"].fillna(0).astype(float)
+            gh_niche = gh_niche[forks <= np.maximum(50, st * 0.15)]
+            gh_niche = gh_niche.sort_values(["comments", "stars"], ascending=[False, True])
+            extras.append(gh_niche.head(max_extra // 2))
 
     if not extras:
         return candidates
@@ -218,10 +222,19 @@ def rerank(
     niche_boost = np.zeros(len(candidates), dtype=np.float64)
     if devops_mode:
         stars = candidates["stars"].fillna(0).astype(float).to_numpy()
+        forks = candidates["forks"].fillna(0).astype(float).to_numpy()
+        comments = candidates["comments"].fillna(0).astype(float).to_numpy()
+        issues = candidates["issues_open"].fillna(0).astype(float).to_numpy()
         # Prefer active but not mega repos — stand-out contributor opportunity
-        niche_boost = np.exp(-((np.log1p(stars) - 8.0) ** 2) / 12.0)
+        niche_boost = np.exp(-((np.log1p(stars) - 8.0) ** 2) / 10.0)
+        activity = np.log1p(comments + issues)
+        low_fork_ratio = forks <= np.maximum(50.0, stars * 0.15)
+        mid_size = (stars >= 200.0) & (stars <= 25000.0)
+        niche_boost = niche_boost * (1.0 + 0.35 * (activity / (activity.max() + 1e-9)))
+        niche_boost = np.where(mid_size & low_fork_ratio, niche_boost * 1.45, niche_boost)
+        niche_boost = np.where(stars > 25000, niche_boost * 0.12, niche_boost)
+        niche_boost = np.where(stars > 15000, niche_boost * 0.55, niche_boost)
         niche_boost = niche_boost / (niche_boost.max() + 1e-9)
-        niche_boost = np.where(stars > 30000, niche_boost * 0.35, niche_boost)
 
     if trend_mode:
         final = (
@@ -235,6 +248,17 @@ def rerank(
             + 0.35 * gfi_boost
             + 0.12 * niche_boost
             + 0.18 * gha_boost
+        )
+    elif devops_mode:
+        final = (
+            0.28 * relevance01
+            + 0.18 * health
+            + 0.12 * vis
+            - cfg.w_effort * effort
+            + 0.10 * dom_boost
+            + 0.18 * kw_boost
+            + 0.42 * niche_boost
+            + 0.22 * gha_boost
         )
     else:
         effort_term = cfg.w_effort * effort

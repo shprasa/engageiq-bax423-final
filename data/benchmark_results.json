@@ -41,6 +41,12 @@
       "pass_raj": false,
       "pass_custom": true,
       "passed": true,
+      "pass_criteria": {
+        "gfi_repos_ge3": true,
+        "no_cpp_rust": true,
+        "discussion_ml_focused": true,
+        "brief_under_1hr": true
+      },
       "profile": {
         "background": "MSBA student, graduating soon. Wants to build a visible open-source portfolio before job hunting.",
         "interests": "Machine learning, NLP, data pipelines. Comfortable with Python and pandas.",
@@ -66,13 +72,18 @@
       "top10_ml_hits": 0,
       "top10_infra_hits": 10,
       "top10_devtools_hits": 0,
-      "profile_match_pct": 60,
+      "profile_match_pct": 59,
       "pass_sofia": false,
       "pass_david": true,
-      "pass_lina": true,
+      "pass_lina": false,
       "pass_raj": false,
       "pass_custom": true,
       "passed": true,
+      "pass_criteria": {
+        "infra_not_webdev": true,
+        "niche_high_activity": true,
+        "discussion_oriented": true
+      },
       "profile": {
         "background": "Mid-career DevOps engineer (5 years). Wants to establish thought leadership in cloud-native infrastructure.",
         "interests": "Kubernetes, Terraform, CI/CD, observability. Reads infrastructure blogs heavily.",
@@ -105,6 +116,11 @@
       "pass_raj": false,
       "pass_custom": true,
       "passed": true,
+      "pass_criteria": {
+        "recency_velocity_over_match": true,
+        "wow_analytics": true,
+        "rising_in_brief": true
+      },
       "profile": {
         "background": "Data journalist at a tech publication. Monitors open-source and tech communities for story leads.",
         "interests": "Trending repos, viral discussions, emerging tools, community drama. Breadth over depth.",
@@ -133,10 +149,15 @@
       "profile_match_pct": 78,
       "pass_sofia": false,
       "pass_david": false,
-      "pass_lina": true,
+      "pass_lina": false,
       "pass_raj": true,
       "pass_custom": true,
       "passed": true,
+      "pass_criteria": {
+        "devtools_not_general": true,
+        "discussion_threads": true,
+        "rl_deprioritize_low_engagement": true
+      },
       "profile": {
         "background": "Technical co-founder of a developer tools startup. Wants to grow awareness by engaging in relevant communities.",
         "interests": "Developer productivity, APIs, CLI tools, open-source business models.",

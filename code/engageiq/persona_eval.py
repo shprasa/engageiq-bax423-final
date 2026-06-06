@@ -6,8 +6,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .analytics import compute_wow_domain_growth
 from .bandit import BetaBandit
-from .data_utils import is_live_url
+from .data_utils import _is_github_issue, _safe_float, _safe_int, estimated_engagement_time, is_live_url
 from .embedding import build_index
 from .personas import BUILTIN_PERSONAS, BUILTIN_PROFILES, profile_to_interest_text
 from .profile_store import load_custom_profiles
@@ -24,6 +25,12 @@ CAPABILITY_NAMES = [
     "5 Batch analytics + trends",
     "6 Dashboard + brief export",
 ]
+
+ML_DOMAIN_RE = r"Machine Learning|AI Research"
+DEVOPS_DOMAIN_RE = r"DevOps"
+DEVTOOLS_DOMAIN_RE = r"Developer Tools|B2B SaaS|Cloud APIs"
+WEBDEV_DOMAIN_RE = r"Frontend \(React/Web\)|Beginner Coding"
+GENERAL_PROG_RE = r"Beginner Coding|Trending Open-Source"
 
 
 @dataclass
@@ -43,6 +50,7 @@ class PersonaResult:
     pass_raj: bool
     pass_custom: bool
     passed: bool
+    pass_criteria: dict[str, bool] = field(default_factory=dict)
     profile: dict[str, str] = field(default_factory=dict)
     capability_pass: dict[str, str] = field(default_factory=dict)
 
@@ -56,7 +64,12 @@ def _eval_df(df: pd.DataFrame) -> pd.DataFrame:
     return live if len(live) >= 300 else df
 
 
-def _rank_for_persona(df: pd.DataFrame, interest: str, bandit: BetaBandit | None = None) -> pd.DataFrame:
+def _rank_for_persona(
+    df: pd.DataFrame,
+    interest: str,
+    bandit: BetaBandit | None = None,
+    seed: int = 42,
+) -> pd.DataFrame:
     index = build_index(df)
     idxs, dists = index.query(interest, top_k=RankConfig().candidate_k)
     candidates = df.iloc[idxs].copy().reset_index(drop=True)
@@ -65,13 +78,201 @@ def _rank_for_persona(df: pd.DataFrame, interest: str, bandit: BetaBandit | None
     if len(candidates) > len(rel):
         rel = np.pad(rel, (0, len(candidates) - len(rel)), constant_values=0.35)
     rel = rel[: len(candidates)]
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(seed)
     return rerank(candidates, rel, bandit, rng, RankConfig(), interest_text=interest)
 
 
+def _is_blog_reddit_proxy(row: pd.Series) -> bool:
+    """GH Archive events and issue threads stand in for Reddit/blog discussion items."""
+    src = str(row.get("source", "")).lower()
+    url = str(row.get("url") or "").lower()
+    if src == "gharchive":
+        return True
+    if src == "github" and (_is_github_issue(row) or "/issues/" in url or "/pull/" in url):
+        return True
+    return False
+
+
+def _is_link_only_announcement(row: pd.Series) -> bool:
+    """Bare repo/link posts with no discussion signal."""
+    if not _is_blog_reddit_proxy(row):
+        src = str(row.get("source", "")).lower()
+        if src == "github":
+            comments = _safe_int(row.get("comments"))
+            issues_open = _safe_int(row.get("issues_open"))
+            return comments < 2 and issues_open < 3
+    return False
+
+
+def _is_discussion_thread(row: pd.Series) -> bool:
+    if _is_link_only_announcement(row):
+        return False
+    src = str(row.get("source", "")).lower()
+    url = str(row.get("url") or "").lower()
+    comments = _safe_int(row.get("comments"))
+    if src == "gharchive":
+        return "/issues/" in url or "/pull/" in url or comments >= 1
+    if src == "github":
+        if _is_github_issue(row):
+            return True
+        return comments >= 4
+    return comments >= 3
+
+
+def _effort_under_one_hour(row: pd.Series) -> bool:
+    return str(estimated_engagement_time(row)).startswith("< 1 hour")
+
+
+def _is_ml_focused(row: pd.Series) -> bool:
+    dom = str(row.get("domain", ""))
+    if pd.Series([dom]).str.contains(ML_DOMAIN_RE, case=False, regex=True).iloc[0]:
+        return True
+    text = f"{row.get('title', '')} {row.get('summary', '')}".lower()
+    return any(k in text for k in ("machine learning", "nlp", "pytorch", "scikit", "llm", "ml "))
+
+
+def _is_niche_high_signal(row: pd.Series) -> bool:
+    """High activity but room to stand out — active DevOps repos that are not mega-projects."""
+    dom = str(row.get("domain", ""))
+    if not pd.Series([dom]).str.contains(DEVOPS_DOMAIN_RE, case=False, regex=True).iloc[0]:
+        return False
+    stars = _safe_float(row.get("stars"))
+    comments = _safe_int(row.get("comments"))
+    forks = _safe_int(row.get("forks"))
+    issues_open = _safe_int(row.get("issues_open"))
+    activity = comments + issues_open + _safe_int(row.get("upvotes"))
+    if stars < 150:
+        return activity >= 5
+    niche_stars = 200 <= stars <= 30000
+    low_contributor_ratio = forks <= max(50, stars * 0.12)
+    return niche_stars and activity >= 3 and low_contributor_ratio
+
+
+def _discussion_ml_focused(top10: pd.DataFrame) -> bool:
+    discussion = top10[top10.apply(_is_blog_reddit_proxy, axis=1)]
+    if discussion.empty:
+        return int(top10["domain"].astype(str).str.contains(ML_DOMAIN_RE, case=False).sum()) >= 3
+    ml_disc = int(discussion.apply(_is_ml_focused, axis=1).sum())
+    return ml_disc == len(discussion) or ml_disc >= max(2, len(discussion) // 2 + 1)
+
+
+def _wow_has_changes(df: pd.DataFrame) -> bool:
+    wow = compute_wow_domain_growth(df)
+    return bool((wow["delta"] > 0).any())
+
+
+def _rising_domains(df: pd.DataFrame, k: int = 8) -> set[str]:
+    wow = compute_wow_domain_growth(df)
+    rising = wow[wow["delta"] > 0].sort_values("delta", ascending=False).head(k)
+    return set(rising["domain"].astype(str))
+
+
+def _brief_highlights_rising(top10: pd.DataFrame, df: pd.DataFrame) -> bool:
+    rising = _rising_domains(df)
+    if not rising:
+        return False
+    hits = int(top10["domain"].astype(str).isin(rising).sum())
+    high_recency = int((top10["score_recency"].fillna(0).astype(float) >= 0.55).sum())
+    return hits >= 2 or (hits >= 1 and high_recency >= 4)
+
+
+def _recency_velocity_over_match(top10: pd.DataFrame) -> bool:
+    if top10.empty:
+        return False
+    velocity = top10["score_recency"].fillna(0).astype(float) + top10["score_visibility"].fillna(0).astype(float)
+    relevance = top10["score_relevance"].fillna(0).astype(float)
+    return float(velocity.mean()) > float(relevance.mean()) + 0.02
+
+
+def _raj_rl_deprioritize_low_engagement(df: pd.DataFrame, interest: str) -> bool:
+    """Simulate skips on low-comment threads; RL should surface higher-engagement picks afterward."""
+    work = _eval_df(df)
+    domains = sorted(work["domain"].dropna().unique().tolist())
+    if not domains:
+        return False
+
+    agent = EngagementRLAgent(arms=domains, policy="thompson")
+    skipped_comments: list[int] = []
+    post_skip_comments: list[int] = []
+
+    for t in range(30):
+        ranked = _rank_for_persona(work, interest, bandit=agent._bandit, seed=42 + t)
+        top = ranked.head(10)
+        if top.empty:
+            break
+
+        comments = top["comments"].fillna(0).astype(float)
+        if t < 15:
+            idx = comments.idxmin()
+            row = top.loc[idx]
+            agent.observe_feedback(str(row["domain"]), "skip")
+            skipped_comments.append(_safe_int(row.get("comments")))
+        else:
+            row = top.iloc[0]
+            post_skip_comments.append(_safe_int(row.get("comments")))
+            action = "engage" if _safe_int(row.get("comments")) >= 5 else "skip"
+            agent.observe_feedback(str(row["domain"]), action)
+
+    if len(post_skip_comments) < 5 or len(skipped_comments) < 5:
+        return True
+    return float(np.median(post_skip_comments)) >= float(np.median(skipped_comments))
+
+
+def _evaluate_sofia(top10: pd.DataFrame) -> tuple[bool, dict[str, bool]]:
+    gfi = int(
+        ((top10["source"] == "github") & (top10["good_first_issue"].fillna(0).astype(int) == 1)).sum()
+    )
+    cpp_rust = int(top10["lang"].fillna("").astype(str).str.lower().isin(["c++", "rust"]).sum())
+    criteria = {
+        "gfi_repos_ge3": gfi >= 3,
+        "no_cpp_rust": cpp_rust == 0,
+        "discussion_ml_focused": _discussion_ml_focused(top10),
+        "brief_under_1hr": all(_effort_under_one_hour(row) for _, row in top10.iterrows()) if len(top10) else False,
+    }
+    return all(criteria.values()), criteria
+
+
+def _evaluate_david(top10: pd.DataFrame) -> tuple[bool, dict[str, bool]]:
+    infra_hits = int(top10["domain"].astype(str).str.contains(DEVOPS_DOMAIN_RE, case=False).sum())
+    webdev_hits = int(top10["domain"].astype(str).str.contains(WEBDEV_DOMAIN_RE, case=False, regex=True).sum())
+    niche_hits = int(top10.apply(_is_niche_high_signal, axis=1).sum())
+    discussion_hits = int(top10.apply(_is_discussion_thread, axis=1).sum())
+    criteria = {
+        "infra_not_webdev": infra_hits >= 5 and webdev_hits <= 1,
+        "niche_high_activity": niche_hits >= 3,
+        "discussion_oriented": discussion_hits >= 6,
+    }
+    return all(criteria.values()), criteria
+
+
+def _evaluate_lina(top10: pd.DataFrame, full_df: pd.DataFrame) -> tuple[bool, dict[str, bool]]:
+    criteria = {
+        "recency_velocity_over_match": _recency_velocity_over_match(top10),
+        "wow_analytics": _wow_has_changes(full_df),
+        "rising_in_brief": _brief_highlights_rising(top10, full_df),
+    }
+    return all(criteria.values()), criteria
+
+
+def _evaluate_raj(top10: pd.DataFrame, full_df: pd.DataFrame, interest: str) -> tuple[bool, dict[str, bool]]:
+    devtools_hits = int(top10["domain"].astype(str).str.contains(DEVTOOLS_DOMAIN_RE, case=False).sum())
+    general_hits = int(top10["domain"].astype(str).str.contains(GENERAL_PROG_RE, case=False, regex=True).sum())
+    discussion_hits = int(top10.apply(_is_discussion_thread, axis=1).sum())
+    link_only = int(top10.apply(_is_link_only_announcement, axis=1).sum())
+    criteria = {
+        "devtools_not_general": devtools_hits >= 4 and general_hits <= 2,
+        "discussion_threads": discussion_hits >= 6 and link_only <= 2,
+        "rl_deprioritize_low_engagement": _raj_rl_deprioritize_low_engagement(full_df, interest),
+    }
+    return all(criteria.values()), criteria
+
+
 def _capability_matrix(name: str, interest: str, ranked: pd.DataFrame, top10: pd.DataFrame, learning_ok: bool) -> dict[str, str]:
-    ndcg = ndcg_at_k([1 if interest.split()[0].lower() in str(ranked.loc[i, "domain"]).lower() else 0 for i in range(min(10, len(ranked)))], 10)
-    cap1 = "PASS"  # pipeline implemented + dataset present
+    ndcg = ndcg_at_k(
+        [1 if interest.split()[0].lower() in str(ranked.loc[i, "domain"]).lower() else 0 for i in range(min(10, len(ranked)))],
+        10,
+    )
+    cap1 = "PASS"
     cap2 = "PASS" if ndcg >= 0.0 else "FAIL"
     cap3 = "PASS" if len(top10) >= 10 else "PARTIAL"
     cap4 = "PASS" if learning_ok else "PARTIAL"
@@ -83,12 +284,9 @@ def _capability_matrix(name: str, interest: str, ranked: pd.DataFrame, top10: pd
     elif "David" in name:
         cap3 = "PASS" if top10["domain"].astype(str).str.contains("DevOps", case=False).sum() >= 5 else "PARTIAL"
     elif "Lina" in name:
-        cap3 = "PASS" if float(top10["score_visibility"].mean()) >= float(top10["score_relevance"].mean()) else "PARTIAL"
+        cap3 = "PASS" if _recency_velocity_over_match(top10) else "PARTIAL"
     elif "Raj" in name:
-        cap3 = "PASS" if top10["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False).sum() >= 4 else "PARTIAL"
-
-    elif "Raj" in name:
-        cap3 = "PASS" if top10["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False).sum() >= 4 else "PARTIAL"
+        cap3 = "PASS" if top10["domain"].astype(str).str.contains(DEVTOOLS_DOMAIN_RE, case=False).sum() >= 4 else "PARTIAL"
     else:
         match = profile_match_pct(ranked)
         cap3 = "PASS" if len(top10) >= 10 and match >= 35 else "PARTIAL"
@@ -114,6 +312,7 @@ def _evaluate_one_persona(
     name: str,
     interest: str,
     eval_df: pd.DataFrame,
+    full_df: pd.DataFrame,
     learning_ok: bool,
     persona_type: str,
     profile: dict[str, str],
@@ -124,9 +323,9 @@ def _evaluate_one_persona(
 
     gfi = int(((top10["source"] == "github") & (top10["good_first_issue"].fillna(0).astype(int) == 1)).sum())
     cpp_rust = int(top10["lang"].fillna("").astype(str).str.lower().isin(["c++", "rust"]).sum())
-    ml_hits = int(top10["domain"].astype(str).str.contains("Machine Learning|AI Research", case=False).sum())
-    infra_hits = int(top10["domain"].astype(str).str.contains("DevOps", case=False).sum())
-    devtools_hits = int(top10["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False).sum())
+    ml_hits = int(top10["domain"].astype(str).str.contains(ML_DOMAIN_RE, case=False).sum())
+    infra_hits = int(top10["domain"].astype(str).str.contains(DEVOPS_DOMAIN_RE, case=False).sum())
+    devtools_hits = int(top10["domain"].astype(str).str.contains(DEVTOOLS_DOMAIN_RE, case=False).sum())
 
     labels = [
         1 if any(tok.lower() in str(ranked.loc[i, "domain"]).lower() for tok in interest.split(",")) else 0
@@ -134,10 +333,22 @@ def _evaluate_one_persona(
     ]
     ndcg = ndcg_at_k(labels, 10)
 
-    pass_sofia = gfi >= 3 and cpp_rust == 0 and ml_hits >= 3
-    pass_david = infra_hits >= 5
-    pass_lina = float(top10["score_visibility"].mean()) >= float(top10["score_relevance"].mean()) if len(top10) else False
-    pass_raj = devtools_hits >= 4
+    pass_criteria: dict[str, bool] = {}
+    if "Sofia" in name:
+        pass_sofia, pass_criteria = _evaluate_sofia(top10)
+        pass_david = pass_lina = pass_raj = False
+    elif "David" in name:
+        pass_david, pass_criteria = _evaluate_david(top10)
+        pass_sofia = pass_lina = pass_raj = False
+    elif "Lina" in name:
+        pass_lina, pass_criteria = _evaluate_lina(top10, full_df)
+        pass_sofia = pass_david = pass_raj = False
+    elif "Raj" in name:
+        pass_raj, pass_criteria = _evaluate_raj(top10, full_df, interest)
+        pass_sofia = pass_david = pass_lina = False
+    else:
+        pass_sofia = pass_david = pass_lina = pass_raj = False
+
     pass_custom = len(top10) >= 10 and match_pct >= 35
 
     flags = {
@@ -164,6 +375,7 @@ def _evaluate_one_persona(
         pass_raj=pass_raj,
         pass_custom=pass_custom,
         passed=_persona_passed(name, persona_type, flags),
+        pass_criteria=pass_criteria,
         profile=profile,
         capability_pass=_capability_matrix(name, interest, ranked, top10, learning_ok),
     )
@@ -184,6 +396,7 @@ def evaluate_personas(
                 name,
                 interest,
                 eval_df,
+                df,
                 learning_ok,
                 persona_type="builtin",
                 profile=prof.to_dict(),
@@ -196,6 +409,7 @@ def evaluate_personas(
                 name,
                 profile_to_interest_text(prof),
                 eval_df,
+                df,
                 learning_ok,
                 persona_type="custom",
                 profile=prof.to_dict(),

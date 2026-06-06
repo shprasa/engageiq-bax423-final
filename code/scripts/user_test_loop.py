@@ -242,7 +242,9 @@ def check_persona_benchmarks(report: Report, df: pd.DataFrame) -> None:
     for r in results:
         key = persona_keys.get(r.persona)
         if key and not getattr(r, key):
-            errors.append(f"{r.persona} failed {key}")
+            failed = [k for k, v in (r.pass_criteria or {}).items() if not v]
+            detail = f" — failed: {', '.join(failed)}" if failed else ""
+            errors.append(f"{r.persona} failed exact PDF criteria{detail}")
         if r.persona_type == "custom" and not r.passed:
             errors.append(f"{r.persona} failed custom benchmark (match={r.profile_match_pct}%)")
         if not r.profile:
