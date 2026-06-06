@@ -473,8 +473,9 @@ def action_badge(action: str) -> str:
 
 
 def score_pills(row: pd.Series) -> str:
+    match = row.get("score_match", row.get("score_relevance", 0))
     pills = [
-        ("Relevance", row.get("score_relevance", 0)),
+        ("Match", match),
         ("Health", row.get("score_health", 0)),
         ("Visibility", row.get("score_visibility", 0)),
         ("Effort", row.get("score_effort", 0)),
@@ -717,7 +718,7 @@ def render_opportunity_card(
             )
 
         score_facts = [
-            ("Match", f"{float(row.get('score_relevance', 0)):.0%}"),
+            ("Match", f"{float(row.get('score_match', row.get('score_relevance', 0))):.0%}"),
             ("Activity", f"{float(row.get('score_health', 0)):.0%}"),
             ("Visibility", f"{float(row.get('score_visibility', 0)):.0%}"),
             ("Effort", f"{float(row.get('score_effort', 0)):.0%}"),

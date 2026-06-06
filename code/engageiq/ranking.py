@@ -264,10 +264,40 @@ def rerank(
     out["score_visibility"] = vis
     out["score_effort"] = effort
     out["score_recency"] = recency
+    if trend_mode:
+        score_match = np.clip(
+            0.30 * relevance01 + 0.35 * vis + 0.20 * recency + 0.15 * kw_boost,
+            0.0,
+            1.0,
+        )
+    elif devops_mode:
+        score_match = np.clip(
+            0.35 * relevance01 + 0.25 * kw_boost + 0.20 * gha_boost + 0.20 * niche_boost,
+            0.0,
+            1.0,
+        )
+    elif portfolio_mode:
+        score_match = np.clip(
+            0.40 * relevance01 + 0.35 * gfi_boost + 0.25 * (1.0 - effort),
+            0.0,
+            1.0,
+        )
+    else:
+        score_match = relevance01.copy()
+    out["score_match"] = score_match
     out["score_final"] = final
 
     out = out.sort_values("score_final", ascending=False).head(cfg.final_k).reset_index(drop=True)
     return out
+
+
+def profile_match_pct(ranked: pd.DataFrame) -> int:
+    """Header metric: average persona-aware match on top-10 results."""
+    top = ranked.head(10)
+    if top.empty:
+        return 0
+    col = "score_match" if "score_match" in top.columns else "score_relevance"
+    return int(round(100 * float(top[col].mean())))
 
 
 def ndcg_at_k(relevances: list[int] | np.ndarray, k: int) -> float:

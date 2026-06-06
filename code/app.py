@@ -30,7 +30,7 @@ from engageiq.data_utils import (
 from engageiq.domains import DOMAINS
 from engageiq.embedding import build_index
 from engageiq.personas import BUILTIN_PERSONAS, CUSTOM_SENTINEL
-from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
+from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, profile_match_pct, rerank
 from engageiq.reinforcement_learning import EngagementRLAgent
 from engageiq.snapshot_ops import merge_live_refresh
 from engageiq.streaming import OpportunityStream
@@ -151,8 +151,9 @@ def _profile_display_name(selected: str) -> str:
 
 
 def _explain_row(row: pd.Series) -> str:
+    match = float(row.get("score_match", row.get("score_relevance", 0)))
     parts = [
-        f"Match {row['score_relevance']:.0%} to your interests",
+        f"Match {match:.0%} to your interests",
         f"Community activity {row['score_health']:.0%}",
         f"Visibility {row['score_visibility']:.0%}",
         f"Effort level {row['score_effort']:.0%}",
@@ -453,7 +454,7 @@ def main() -> None:
     domain_tokens = [w.strip() for w in user.interest_text.split(",") if w.strip()]
     labels = [
         1 if any(tok.lower() in str(ranked.loc[i, "domain"]).lower() for tok in domain_tokens) else 0
-        for i in range(len(ranked))
+        for i in range(min(10, len(ranked)))
     ]
     ndcg_val = ndcg_at_k(labels, 10)
     live_in_results = int(live_mask(ranked).sum())
@@ -462,7 +463,7 @@ def main() -> None:
 
     with tab_discover:
         profile_short = _profile_display_name(selected_profile)
-        match_pct = min(100, max(0, int(round(ndcg_val * 100))))
+        match_pct = profile_match_pct(ranked)
         acted_ids = set(st.session_state.get("acted_opportunity_ids", []))
 
         st.markdown(f"### Opportunities for **{profile_short}**")
@@ -482,7 +483,7 @@ def main() -> None:
         m1.metric(
             "Interest match",
             f"{match_pct}%",
-            help="How well the top results fit your sidebar interests. 100% = strong fit.",
+            help="Average persona-aware fit of your top-10 ranked results (text similarity + profile signals like visibility for Lina or DevOps fit for David).",
         )
         m2.metric(
             "GitHub API in list",
@@ -568,7 +569,7 @@ def main() -> None:
         with st.expander("What do the numbers above mean? (for course graders)"):
             st.markdown(
                 f"""
-- **Interest match ({match_pct}%)** — Ranking quality metric (NDCG@10 = {ndcg_val:.3f}). Measures how well top results match your interest keywords.
+- **Interest match ({match_pct}%)** — Average persona-aware fit of your top-10 results (embedding similarity plus profile signals such as visibility for trend-spotting or DevOps domain fit). Keyword NDCG@10 = {ndcg_val:.3f}.
 - **GitHub API / GitHub Archive in list** — How many of each source appear in the ranked pool of up to 100 items.
 - **Data pool** — Snapshot mode ranks saved live API rows; backup mode ranks the full ≥10k offline dataset (including synthetic practice rows).
 - **Sort & filter** — Reorders/filters the ranked pool for display.
