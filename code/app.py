@@ -29,6 +29,13 @@ from engageiq.data_utils import (
 )
 from engageiq.domains import DOMAINS
 from engageiq.embedding import build_index
+from engageiq.benchmark_ops import persona_benchmark_row, run_and_write_benchmarks
+from engageiq.profile_store import (
+    delete_custom_profile,
+    load_custom_profiles,
+    upsert_custom_profile,
+    validate_profile,
+)
 from engageiq.personas import (
     BUILTIN_PROFILES,
     BUILTIN_PERSONAS,
@@ -109,7 +116,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 16}
+    return store, {"paths": paths, "version": 17}
 
 
 @st.cache_resource
@@ -127,30 +134,27 @@ def _init_user_state(domains: list[str]) -> UserState:
     )
 
 
-def _normalize_custom_profile(raw: str | dict) -> dict[str, str]:
-    if isinstance(raw, dict):
-        return UserProfile.from_dict(raw).to_dict()
-    text = str(raw or "").strip()
-    return UserProfile(
-        background="",
-        interests=text,
-        goal="",
-        platforms="",
-        time_budget="",
-    ).to_dict()
-
-
 def _persona_catalog() -> dict[str, UserProfile]:
-    custom = {
-        name: UserProfile.from_dict(_normalize_custom_profile(raw))
-        for name, raw in st.session_state.get("custom_personas", {}).items()
-    }
-    return {**BUILTIN_PROFILES, **custom}
+    return {**BUILTIN_PROFILES, **load_custom_profiles()}
 
 
 def _persona_option_labels() -> list[str]:
-    custom = list(st.session_state.get("custom_personas", {}).keys())
-    return list(BUILTIN_PERSONAS.keys()) + custom + [CUSTOM_SENTINEL]
+    custom = list(load_custom_profiles().keys())
+    return list(BUILTIN_PROFILES.keys()) + custom + [CUSTOM_SENTINEL]
+
+
+def _persist_profile_and_benchmark(df: pd.DataFrame, paths, profile_name: str) -> dict:
+    payload = run_and_write_benchmarks(df, paths)
+    row = persona_benchmark_row(payload, profile_name) or {}
+    st.session_state.last_benchmark_payload = payload
+    st.session_state.last_profile_save_msg = (
+        f"Saved **{profile_name}** to disk. "
+        f"Benchmark: interest match **{row.get('profile_match_pct', '—')}%**, "
+        f"{'PASS' if row.get('passed') else 'CHECK'} "
+        f"({row.get('persona_type', 'custom')} profile)."
+    )
+    st.cache_resource.clear()
+    return payload
 
 
 def _on_persona_select_change() -> None:
@@ -366,29 +370,48 @@ def main() -> None:
 
         with st.expander("Save a custom profile"):
             custom_name = st.text_input("Profile name", placeholder="e.g. Security researcher")
+            st.caption(
+                "All five fields are required. Saving writes `data/custom_personas.json` "
+                "and regenerates `data/benchmark_results.json` for every persona."
+            )
+            if st.session_state.get("last_profile_save_msg"):
+                st.success(st.session_state.last_profile_save_msg)
             c_save, c_del = st.columns(2)
-            if c_save.button("Save current profile", use_container_width=True):
+            if c_save.button("Save profile & run benchmarks", use_container_width=True, type="primary"):
                 name = custom_name.strip()
+                profile = read_profile_from_session(st.session_state)
+                missing = validate_profile(profile)
                 if not name:
                     st.warning("Enter a profile name first.")
                 elif name in BUILTIN_PROFILES:
                     st.warning("That name is reserved for a built-in course persona.")
+                elif missing:
+                    st.warning(f"Complete all fields: {', '.join(missing)}")
                 else:
-                    st.session_state.custom_personas[name] = read_profile_from_session(st.session_state).to_dict()
-                    st.session_state.persona_select = name
-                    st.success(f"Saved profile: {name}")
-                    st.rerun()
+                    try:
+                        upsert_custom_profile(name, profile)
+                        st.session_state.persona_select = name
+                        with st.spinner("Running full benchmarks for all personas (~60s)…"):
+                            _persist_profile_and_benchmark(df, paths, name)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Save failed: {exc}")
             if c_del.button("Delete custom profile", use_container_width=True):
-                if selected_profile in st.session_state.get("custom_personas", {}):
-                    del st.session_state.custom_personas[selected_profile]
-                    first = profile_options[0]
-                    apply_profile_to_session(st.session_state, BUILTIN_PROFILES[first])
-                    st.session_state.persona_select = first
-                    user.interest_text = BUILTIN_PERSONAS[first]
-                    st.session_state.suggestion_cache = {}
-                    st.rerun()
+                if selected_profile in load_custom_profiles():
+                    try:
+                        delete_custom_profile(selected_profile)
+                        first = profile_options[0]
+                        apply_profile_to_session(st.session_state, BUILTIN_PROFILES[first])
+                        st.session_state.persona_select = first
+                        user.interest_text = BUILTIN_PERSONAS[first]
+                        st.session_state.suggestion_cache = {}
+                        with st.spinner("Re-running benchmarks after delete (~60s)…"):
+                            _persist_profile_and_benchmark(df, paths, first)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Delete failed: {exc}")
                 else:
-                    st.info("Select a custom profile to delete.")
+                    st.info("Select a saved custom profile to delete.")
 
         st.markdown("---")
         st.markdown("**Data pool for ranking**")

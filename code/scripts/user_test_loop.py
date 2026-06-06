@@ -226,6 +226,8 @@ def check_plain_text_summaries(report: Report, df: pd.DataFrame) -> None:
 
 def check_persona_benchmarks(report: Report, df: pd.DataFrame) -> None:
     name = "persona_benchmarks"
+    from engageiq.profile_store import load_custom_profiles
+
     learning = learning_benchmark(df, PERSONAS["Raj (Startup Founder / Marketing-Focused)"], rounds=60)
     learning_ok = learning["improvement"] > 0 or learning["reward_improvement_last10"] > 0
     results = evaluate_personas(df, learning_ok=learning_ok)
@@ -241,9 +243,19 @@ def check_persona_benchmarks(report: Report, df: pd.DataFrame) -> None:
         key = persona_keys.get(r.persona)
         if key and not getattr(r, key):
             errors.append(f"{r.persona} failed {key}")
+        if r.persona_type == "custom" and not r.passed:
+            errors.append(f"{r.persona} failed custom benchmark (match={r.profile_match_pct}%)")
+        if not r.profile:
+            errors.append(f"{r.persona} missing saved profile fields in benchmark")
         partial = [k for k, v in r.capability_pass.items() if v != "PASS"]
         if partial:
             errors.append(f"{r.persona} partial capabilities: {partial}")
+
+    saved_custom = load_custom_profiles()
+    benchmark_custom = {r.persona for r in results if r.persona_type == "custom"}
+    for cname in saved_custom:
+        if cname not in benchmark_custom:
+            errors.append(f"Saved custom profile {cname!r} missing from benchmark results")
 
     if learning["rounds"] < 50:
         errors.append(f"RL rounds {learning['rounds']} < 50")

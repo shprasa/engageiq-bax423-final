@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from .bandit import BetaBandit
-from .reinforcement_learning import EngagementRLAgent, run_rl_simulation
-from .embedding import build_index
-from .ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
 from .data_utils import is_live_url
-
-
-from .personas import BUILTIN_PERSONAS
+from .embedding import build_index
+from .personas import BUILTIN_PERSONAS, BUILTIN_PROFILES, profile_to_interest_text
+from .profile_store import load_custom_profiles
+from .ranking import RankConfig, augment_candidates, ndcg_at_k, profile_match_pct, rerank
+from .reinforcement_learning import EngagementRLAgent, run_rl_simulation
 
 PERSONAS = BUILTIN_PERSONAS
 
@@ -29,17 +29,22 @@ CAPABILITY_NAMES = [
 @dataclass
 class PersonaResult:
     persona: str
+    persona_type: str
     ndcg10: float
     top10_github_gfi: int
     top10_cpp_rust: int
     top10_ml_hits: int
     top10_infra_hits: int
     top10_devtools_hits: int
+    profile_match_pct: int
     pass_sofia: bool
     pass_david: bool
     pass_lina: bool
     pass_raj: bool
-    capability_pass: dict[str, str]
+    pass_custom: bool
+    passed: bool
+    profile: dict[str, str] = field(default_factory=dict)
+    capability_pass: dict[str, str] = field(default_factory=dict)
 
 
 def _is_live(url: str) -> bool:
@@ -82,49 +87,144 @@ def _capability_matrix(name: str, interest: str, ranked: pd.DataFrame, top10: pd
     elif "Raj" in name:
         cap3 = "PASS" if top10["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False).sum() >= 4 else "PARTIAL"
 
+    elif "Raj" in name:
+        cap3 = "PASS" if top10["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False).sum() >= 4 else "PARTIAL"
+    else:
+        match = profile_match_pct(ranked)
+        cap3 = "PASS" if len(top10) >= 10 and match >= 35 else "PARTIAL"
+
     return dict(zip(CAPABILITY_NAMES, [cap1, cap2, cap3, cap4, cap5, cap6]))
 
 
-def evaluate_personas(df: pd.DataFrame, learning_ok: bool = True) -> list[PersonaResult]:
-    results: list[PersonaResult] = []
+def _persona_passed(name: str, persona_type: str, flags: dict[str, bool]) -> bool:
+    if persona_type == "custom":
+        return flags["pass_custom"]
+    if "Sofia" in name:
+        return flags["pass_sofia"]
+    if "David" in name:
+        return flags["pass_david"]
+    if "Lina" in name:
+        return flags["pass_lina"]
+    if "Raj" in name:
+        return flags["pass_raj"]
+    return flags["pass_custom"]
+
+
+def _evaluate_one_persona(
+    name: str,
+    interest: str,
+    eval_df: pd.DataFrame,
+    learning_ok: bool,
+    persona_type: str,
+    profile: dict[str, str],
+) -> PersonaResult:
+    ranked = _rank_for_persona(eval_df, interest)
+    top10 = ranked.head(10)
+    match_pct = profile_match_pct(ranked)
+
+    gfi = int(((top10["source"] == "github") & (top10["good_first_issue"].fillna(0).astype(int) == 1)).sum())
+    cpp_rust = int(top10["lang"].fillna("").astype(str).str.lower().isin(["c++", "rust"]).sum())
+    ml_hits = int(top10["domain"].astype(str).str.contains("Machine Learning|AI Research", case=False).sum())
+    infra_hits = int(top10["domain"].astype(str).str.contains("DevOps", case=False).sum())
+    devtools_hits = int(top10["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False).sum())
+
+    labels = [
+        1 if any(tok.lower() in str(ranked.loc[i, "domain"]).lower() for tok in interest.split(",")) else 0
+        for i in range(min(10, len(ranked)))
+    ]
+    ndcg = ndcg_at_k(labels, 10)
+
+    pass_sofia = gfi >= 3 and cpp_rust == 0 and ml_hits >= 3
+    pass_david = infra_hits >= 5
+    pass_lina = float(top10["score_visibility"].mean()) >= float(top10["score_relevance"].mean()) if len(top10) else False
+    pass_raj = devtools_hits >= 4
+    pass_custom = len(top10) >= 10 and match_pct >= 35
+
+    flags = {
+        "pass_sofia": pass_sofia,
+        "pass_david": pass_david,
+        "pass_lina": pass_lina,
+        "pass_raj": pass_raj,
+        "pass_custom": pass_custom,
+    }
+
+    return PersonaResult(
+        persona=name,
+        persona_type=persona_type,
+        ndcg10=ndcg,
+        top10_github_gfi=gfi,
+        top10_cpp_rust=cpp_rust,
+        top10_ml_hits=ml_hits,
+        top10_infra_hits=infra_hits,
+        top10_devtools_hits=devtools_hits,
+        profile_match_pct=match_pct,
+        pass_sofia=pass_sofia,
+        pass_david=pass_david,
+        pass_lina=pass_lina,
+        pass_raj=pass_raj,
+        pass_custom=pass_custom,
+        passed=_persona_passed(name, persona_type, flags),
+        profile=profile,
+        capability_pass=_capability_matrix(name, interest, ranked, top10, learning_ok),
+    )
+
+
+def evaluate_personas(
+    df: pd.DataFrame,
+    learning_ok: bool = True,
+    custom_profiles_path: Path | None = None,
+) -> list[PersonaResult]:
     eval_df = _eval_df(df)
+    results: list[PersonaResult] = []
 
-    for name, interest in PERSONAS.items():
-        ranked = _rank_for_persona(eval_df, interest)
-        top10 = ranked.head(10)
-
-        gfi = int(((top10["source"] == "github") & (top10["good_first_issue"].fillna(0).astype(int) == 1)).sum())
-        cpp_rust = int(top10["lang"].fillna("").astype(str).str.lower().isin(["c++", "rust"]).sum())
-        ml_hits = int(top10["domain"].astype(str).str.contains("Machine Learning|AI Research", case=False).sum())
-        infra_hits = int(top10["domain"].astype(str).str.contains("DevOps", case=False).sum())
-        devtools_hits = int(top10["domain"].astype(str).str.contains("Developer Tools|B2B SaaS|Cloud APIs", case=False).sum())
-
-        labels = [1 if any(tok.lower() in str(ranked.loc[i, "domain"]).lower() for tok in interest.split(",")) else 0 for i in range(min(10, len(ranked)))]
-        ndcg = ndcg_at_k(labels, 10)
-
-        pass_sofia = gfi >= 3 and cpp_rust == 0 and ml_hits >= 3
-        pass_david = infra_hits >= 5
-        pass_lina = float(top10["score_visibility"].mean()) >= float(top10["score_relevance"].mean())
-        pass_raj = devtools_hits >= 4
-
+    for name, prof in BUILTIN_PROFILES.items():
+        interest = BUILTIN_PERSONAS[name]
         results.append(
-            PersonaResult(
-                persona=name,
-                ndcg10=ndcg,
-                top10_github_gfi=gfi,
-                top10_cpp_rust=cpp_rust,
-                top10_ml_hits=ml_hits,
-                top10_infra_hits=infra_hits,
-                top10_devtools_hits=devtools_hits,
-                pass_sofia=pass_sofia,
-                pass_david=pass_david,
-                pass_lina=pass_lina,
-                pass_raj=pass_raj,
-                capability_pass=_capability_matrix(name, interest, ranked, top10, learning_ok),
+            _evaluate_one_persona(
+                name,
+                interest,
+                eval_df,
+                learning_ok,
+                persona_type="builtin",
+                profile=prof.to_dict(),
+            )
+        )
+
+    for name, prof in load_custom_profiles(custom_profiles_path).items():
+        results.append(
+            _evaluate_one_persona(
+                name,
+                profile_to_interest_text(prof),
+                eval_df,
+                learning_ok,
+                persona_type="custom",
+                profile=prof.to_dict(),
             )
         )
 
     return results
+
+
+def build_benchmark_payload(
+    df: pd.DataFrame,
+    custom_profiles_path: Path | None = None,
+) -> dict:
+    learning = learning_benchmark(df, PERSONAS["Raj (Startup Founder / Marketing-Focused)"], rounds=60)
+    learning_ok = (
+        learning["improvement"] > 0
+        or learning["reward_improvement_last10"] > 0
+        or learning.get("session_reward_gain", 0) > 0
+    )
+    persona_results = evaluate_personas(df, learning_ok=learning_ok, custom_profiles_path=custom_profiles_path)
+    custom_names = [r.persona for r in persona_results if r.persona_type == "custom"]
+
+    return {
+        "dataset": dataset_stats(df),
+        "ingest_benchmark": ingest_benchmark(df),
+        "custom_profiles": custom_names,
+        "personas": [{**r.__dict__, "capability_pass": r.capability_pass} for r in persona_results],
+        "learning_benchmark": learning,
+    }
 
 
 def ingest_benchmark(df: pd.DataFrame) -> dict[str, float | dict]:

@@ -543,8 +543,6 @@ def init_activity_state() -> None:
         st.session_state.activity_log: list[dict] = []
     if "acted_opportunity_ids" not in st.session_state:
         st.session_state.acted_opportunity_ids: list[int] = []
-    if "custom_personas" not in st.session_state:
-        st.session_state.custom_personas: dict[str, str] = {}
 
 
 def log_activity(entry: ActivityEntry) -> None:
