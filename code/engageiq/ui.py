@@ -12,6 +12,7 @@ import streamlit as st
 from engageiq.data_utils import (
     _safe_float,
     _safe_int,
+    card_origin_label,
     decision_facts,
     display_subtitle,
     display_summary,
@@ -539,6 +540,10 @@ def init_activity_state() -> None:
         st.session_state.bookmarks: dict[int, dict] = {}
     if "activity_log" not in st.session_state:
         st.session_state.activity_log: list[dict] = []
+    if "acted_opportunity_ids" not in st.session_state:
+        st.session_state.acted_opportunity_ids: list[int] = []
+    if "custom_personas" not in st.session_state:
+        st.session_state.custom_personas: dict[str, str] = {}
 
 
 def log_activity(entry: ActivityEntry) -> None:
@@ -649,6 +654,7 @@ def render_opportunity_card(
     suggest: str,
     key_prefix: str,
     show_actions: bool = True,
+    use_live_snapshot_pool: bool = True,
 ) -> None:
     bookmarked = is_bookmarked(int(row["id"]))
     url = str(row["url"])
@@ -660,6 +666,8 @@ def render_opportunity_card(
     type_label = short_source_label(row)
     est_time = estimated_engagement_time(row)
     facts = decision_facts(row)
+    origin_text = card_origin_label(url, use_live_snapshot_pool=use_live_snapshot_pool)
+    origin_color = "#166534" if "live API" in origin_text.lower() and use_live_snapshot_pool else "#475569"
 
     with st.container(border=True):
         title = html.escape(headline)
@@ -670,15 +678,11 @@ def render_opportunity_card(
             unsafe_allow_html=True,
         )
 
-        origin_html = (
-            '<span style="color:#166534;font-weight:600;">Live API</span>'
-            if is_live_url(url)
-            else '<span style="color:#64748B;">Offline backup</span>'
-        )
         domain = html.escape(str(row.get("domain") or ""))
         meta = (
             f'<div style="font-size:11px;color:#64748B;margin:0 0 6px 0;line-height:1.35;">'
-            f"{origin_html} · <strong>{html.escape(type_label)}</strong> · "
+            f'<span style="color:{origin_color};font-weight:600;">{html.escape(origin_text)}</span> · '
+            f"<strong>{html.escape(type_label)}</strong> · "
             f"<strong>{domain}</strong></div>"
         )
         st.markdown(meta, unsafe_allow_html=True)
@@ -736,16 +740,12 @@ def render_opportunity_card(
         )
 
         if show_actions:
-            st.caption(f"Estimated engagement: {est_time}")
+            st.caption(f"Estimated engagement: {est_time} · Choose one action — the card will leave the feed and update RL ranking.")
             b1, b2, b3 = st.columns(3)
             if b1.button("Engage", key=f"{key_prefix}_engage_{int(row['id'])}", use_container_width=True, type="primary"):
                 st.session_state._pending_action = ("engage", row_dict)
                 st.rerun()
-            if bookmarked:
-                if b2.button("Saved ★", key=f"{key_prefix}_unbm_{int(row['id'])}", use_container_width=True):
-                    st.session_state._pending_action = ("unbookmark", row_dict)
-                    st.rerun()
-            elif b2.button("Bookmark", key=f"{key_prefix}_bm_{int(row['id'])}", use_container_width=True):
+            if b2.button("Bookmark", key=f"{key_prefix}_bm_{int(row['id'])}", use_container_width=True):
                 st.session_state._pending_action = ("bookmark", row_dict)
                 st.rerun()
             if b3.button("Skip", key=f"{key_prefix}_skip_{int(row['id'])}", use_container_width=True):

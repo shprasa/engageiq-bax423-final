@@ -15,6 +15,7 @@ from engageiq.config import get_paths
 from engageiq.data import OpportunityStore
 from engageiq.data_utils import (
     _safe_int,
+    dataset_pool_summary,
     display_title,
     filter_ranked_results,
     is_live_url,
@@ -28,8 +29,10 @@ from engageiq.data_utils import (
 )
 from engageiq.domains import DOMAINS
 from engageiq.embedding import build_index
+from engageiq.personas import BUILTIN_PERSONAS, CUSTOM_SENTINEL
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, rerank
 from engageiq.reinforcement_learning import EngagementRLAgent
+from engageiq.snapshot_ops import merge_live_refresh
 from engageiq.streaming import OpportunityStream
 from engageiq.suggestions import generate_suggestion, llm_configured, suggestion_provider
 from engageiq.ui import (
@@ -45,24 +48,7 @@ from engageiq.ui import (
     render_rl_policy,
 )
 
-PERSONAS: dict[str, str] = {
-    "Sofia (ML Student / Portfolio Builder)": (
-        "Machine learning, NLP, data pipelines, beginner-friendly open source, good first issues, "
-        "Python, pandas, GitHub issues, GitHub Archive ML issue events."
-    ),
-    "David (DevOps / Niche Community)": (
-        "Kubernetes, Terraform, CI/CD, observability, cloud-native infra, high-activity repos, "
-        "few contributors, GitHub Archive DevOps issue and PR events."
-    ),
-    "Lina (Data Journalist / Trend Spotter)": (
-        "Trending repos, viral discussions, emerging tools, fast-growing communities, recency, velocity, "
-        "GitHub Archive public timeline events, GitHub trending, multi-domain velocity."
-    ),
-    "Raj (Startup Founder / Marketing-Focused)": (
-        "Developer tools, APIs, CLI tools, open-source business, B2B SaaS, discussions where devtools are relevant, "
-        "GitHub Archive and GitHub developer-tools communities."
-    ),
-}
+PERSONAS = BUILTIN_PERSONAS
 
 CHART_THEME = {
     "background": "transparent",
@@ -112,7 +98,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 13}
+    return store, {"paths": paths, "version": 14}
 
 
 @st.cache_resource
@@ -122,11 +108,41 @@ def _build_embedding_index(_version: int, corpus_key: str, df: pd.DataFrame):
 
 def _init_user_state(domains: list[str]) -> UserState:
     return UserState(
-        interest_text=PERSONAS["Sofia (ML Student / Portfolio Builder)"],
+        interest_text=BUILTIN_PERSONAS["Sofia (ML Student / Portfolio Builder)"],
         liked_texts=[],
         rl_agent=EngagementRLAgent(arms=domains, policy="thompson"),
         rng=np.random.default_rng(42),
     )
+
+
+def _persona_catalog() -> dict[str, str]:
+    return {**BUILTIN_PERSONAS, **st.session_state.get("custom_personas", {})}
+
+
+def _persona_option_labels() -> list[str]:
+    custom = list(st.session_state.get("custom_personas", {}).keys())
+    return list(BUILTIN_PERSONAS.keys()) + custom + [CUSTOM_SENTINEL]
+
+
+def _sync_profile_from_selection(user: UserState) -> str:
+    """When the profile dropdown changes, copy preset interests into the editor."""
+    options = _persona_option_labels()
+    if "persona_select" not in st.session_state:
+        st.session_state.persona_select = options[0]
+    selected = st.session_state.persona_select
+    prev = st.session_state.get("_persona_prev")
+    catalog = _persona_catalog()
+    if selected != prev and selected in catalog:
+        user.interest_text = catalog[selected]
+        st.session_state.pop("interest_text_editor", None)
+    st.session_state._persona_prev = selected
+    return selected
+
+
+def _profile_display_name(selected: str) -> str:
+    if selected == CUSTOM_SENTINEL:
+        return "Custom profile"
+    return selected.split("(")[0].strip()
 
 
 def _explain_row(row: pd.Series) -> str:
@@ -163,6 +179,11 @@ def _apply_pending_feedback(user: UserState) -> None:
     row = pd.Series(row_data)
     record_feedback(row, action)
     reward = user.rl_agent.observe_feedback(str(row["domain"]), action)
+    if action in ("engage", "bookmark", "skip"):
+        opp_id = int(row["id"])
+        acted = st.session_state.acted_opportunity_ids
+        if opp_id not in acted:
+            acted.append(opp_id)
     if action in ("engage", "bookmark"):
         snippet = f"{row['domain']}: {display_title(row)}"
         if snippet not in user.liked_texts:
@@ -171,6 +192,25 @@ def _apply_pending_feedback(user: UserState) -> None:
         f"RL reward {reward:+.2f} · {action.replace('_', ' ').title()}",
         icon="✅" if reward > 0 else "⏭️",
     )
+
+
+def _write_snapshot_everywhere(refreshed: pd.DataFrame, paths) -> None:
+    live_only = refreshed[live_mask(refreshed)]
+    snap_paths = {
+        paths.snapshot_csv,
+        paths.project_root / "data" / "opportunities_snapshot.csv",
+        paths.code_dir / "data" / "opportunities_snapshot.csv",
+    }
+    live_paths = {
+        paths.live_csv,
+        paths.code_dir / "data" / "live_opportunities.csv",
+    }
+    for snap_path in snap_paths:
+        snap_path.parent.mkdir(parents=True, exist_ok=True)
+        refreshed.to_csv(snap_path, index=False)
+    for live_path in live_paths:
+        live_path.parent.mkdir(parents=True, exist_ok=True)
+        live_only.to_csv(live_path, index=False)
 
 
 def _chart(df: pd.DataFrame, mark_fn, encode_kwargs: dict) -> alt.Chart:
@@ -255,28 +295,92 @@ def main() -> None:
         if st.button("Clear activity & bookmarks", use_container_width=True):
             st.session_state.activity_log = []
             st.session_state.bookmarks = {}
+            st.session_state.acted_opportunity_ids = []
             user.liked_texts = []
             st.rerun()
 
         st.markdown("---")
-        st.markdown("**Interest profile**")
-        persona = st.selectbox("Persona preset", options=list(PERSONAS.keys()), label_visibility="collapsed")
-        if st.button("Load persona", use_container_width=True):
-            user.interest_text = PERSONAS[persona]
-            st.rerun()
+        st.markdown("**Profile & interests**")
+        profile_options = _persona_option_labels()
+        st.selectbox(
+            "Profile preset",
+            options=profile_options,
+            key="persona_select",
+            help="Choosing a preset fills the interest box below. Pick Custom to write your own.",
+        )
+        selected_profile = _sync_profile_from_selection(user)
 
         user.interest_text = st.text_area(
             "Describe what you want to engage with",
             value=user.interest_text,
             height=120,
             label_visibility="collapsed",
+            key="interest_text_editor",
         )
 
-        live_only = st.toggle(
-            "Rank from live API pool only",
+        with st.expander("Save a custom profile"):
+            custom_name = st.text_input("Profile name", placeholder="e.g. Security researcher")
+            c_save, c_del = st.columns(2)
+            if c_save.button("Save current interests", use_container_width=True):
+                name = custom_name.strip()
+                if not name:
+                    st.warning("Enter a profile name first.")
+                elif name in BUILTIN_PERSONAS:
+                    st.warning("That name is reserved for a built-in course persona.")
+                else:
+                    st.session_state.custom_personas[name] = user.interest_text.strip()
+                    st.session_state.persona_select = name
+                    st.session_state._persona_prev = name
+                    st.success(f"Saved profile: {name}")
+                    st.rerun()
+            if c_del.button("Delete custom profile", use_container_width=True):
+                if selected_profile in st.session_state.get("custom_personas", {}):
+                    del st.session_state.custom_personas[selected_profile]
+                    st.session_state.persona_select = profile_options[0]
+                    st.session_state._persona_prev = profile_options[0]
+                    user.interest_text = BUILTIN_PERSONAS[profile_options[0]]
+                    st.rerun()
+                else:
+                    st.info("Select a custom profile to delete.")
+
+        st.markdown("---")
+        st.markdown("**Data pool for ranking**")
+        use_live_snapshot = st.toggle(
+            "Use saved live API snapshot",
             value=True,
-            help="When on, ranking uses live GitHub API + GitHub Archive URLs. Turn off to include offline backup rows in the ranked pool.",
+            help=(
+                "ON: rank from opportunities saved during the last live GitHub API + GitHub Archive call "
+                f"({live_n:,} rows in the bundled CSV). OFF: rank from the full offline backup dataset "
+                f"({len(df):,} rows total, including synthetic practice rows for ≥10k grading)."
+            ),
         )
+        if not use_live_snapshot:
+            st.caption(
+                "Backup mode: previously live API rows are treated as saved backup opportunities, "
+                "alongside synthetic practice rows (example.local)."
+            )
+        else:
+            st.caption(
+                "Snapshot mode: ranking uses real URLs saved from the last API refresh. "
+                "Turn off to browse the full offline grading dataset."
+            )
+
+        if st.session_state.get("last_api_refresh_msg"):
+            st.success(st.session_state.last_api_refresh_msg)
+
+        if st.button("Refresh live API data now", use_container_width=True, type="primary"):
+            with st.spinner("Calling GitHub API + GitHub Archive…"):
+                try:
+                    refreshed, result = merge_live_refresh(paths.snapshot_csv)
+                    _write_snapshot_everywhere(refreshed, paths)
+                    store._reload_from_csv(paths.snapshot_csv)
+                    st.session_state.last_api_refresh_msg = result.message
+                    st.cache_resource.clear()
+                    st.success(result.message)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Live refresh failed: {exc}")
+
         english_only = st.toggle("English only", value=True)
 
         st.markdown("---")
@@ -336,7 +440,7 @@ def main() -> None:
         ["Discover", "Bookmarks", "Activity", "Analytics"]
     )
 
-    ranked = _rank_opportunities(df, user, user.interest_text, version, live_only, english_only)
+    ranked = _rank_opportunities(df, user, user.interest_text, version, use_live_snapshot, english_only)
 
     domain_tokens = [w.strip() for w in user.interest_text.split(",") if w.strip()]
     labels = [
@@ -349,16 +453,19 @@ def main() -> None:
     pool_gha = int((ranked["source"].astype(str).str.lower() == "gharchive").sum())
 
     with tab_discover:
-        persona_short = persona.split("(")[0].strip()
+        profile_short = _profile_display_name(selected_profile)
         match_pct = min(100, max(0, int(round(ndcg_val * 100))))
+        acted_ids = set(st.session_state.get("acted_opportunity_ids", []))
 
-        st.markdown(f"### Opportunities for **{persona_short}**")
+        st.markdown(f"### Opportunities for **{profile_short}**")
+        st.caption(dataset_pool_summary(df, use_live_snapshot_pool=use_live_snapshot))
         st.markdown(
             '<div class="discover-help-box">'
-            "<strong>How this works:</strong> We search the GitHub API and GitHub Archive public event stream "
-            "for items that match what you typed in the sidebar. Each card is a real place you could comment, "
-            "contribute, or join a discussion. Use the <strong>Sort &amp; filter</strong> section below to change "
-            "what you see — for example, show only GitHub Archive events or the quickest tasks first."
+            "<strong>How this works:</strong> Pick a profile or write custom interests in the sidebar. "
+            "Each card is one saved opportunity from the bundled dataset. "
+            "<strong>Engage / Bookmark / Skip</strong> logs one action, removes the card, updates RL ranking, "
+            "and refreshes the feed. Use <strong>Refresh live API data now</strong> in the sidebar to fetch new rows "
+            "(requires <code>GITHUB_TOKEN</code> in <code>code/.env</code>)."
             "</div>",
             unsafe_allow_html=True,
         )
@@ -380,13 +487,19 @@ def main() -> None:
             help="Number of GitHub Archive events in the current ranked list (before your filters).",
         )
         m4.metric(
-            "Live from web",
-            live_in_results,
-            help="Items with real URLs scraped from the internet (not offline practice/backup rows).",
+            "In ranked pool",
+            live_in_results if use_live_snapshot else len(ranked),
+            help=(
+                "Saved live API rows in the current ranked pool when snapshot mode is on; "
+                "full backup row count when backup mode is on."
+            ),
         )
 
-        if live_only and live_n == 0:
-            st.warning("No live web data loaded. Check that code/data/live_opportunities.csv exists on the server.")
+        if use_live_snapshot and live_n == 0:
+            st.warning(
+                "No saved live API rows in the CSV. Use **Refresh live API data now** in the sidebar "
+                "or turn off **Use saved live API snapshot** to rank the full offline backup."
+            )
 
         st.markdown(
             '<div class="discover-filter-panel"><h4>Sort & filter</h4></div>',
@@ -406,9 +519,12 @@ def main() -> None:
             help="Show everything, GitHub API search results only, or GitHub Archive events only.",
         )
         origin_filter = r1c3.selectbox(
-            "Live or offline",
+            "Data origin",
             options=list(ORIGIN_FILTER_OPTIONS.keys()),
-            help="Live = real scraped links. Offline = backup practice rows for grading without internet.",
+            help=(
+                "Saved from live API = real URLs from the last API refresh. "
+                "Synthetic practice rows = example.local backup rows for offline grading."
+            ),
         )
         max_effort = r1c4.selectbox(
             "Time to start",
@@ -435,31 +551,38 @@ def main() -> None:
             good_first_issue_only=gfi_only,
             max_effort=effort_map[max_effort],
         )
-        displayed = sort_ranked_results(filtered, sort_by=sort_by).head(int(show_limit))
+        pending = filtered[~filtered["id"].astype(int).isin(acted_ids)]
+        displayed = sort_ranked_results(pending, sort_by=sort_by).head(int(show_limit))
 
-        st.markdown(f"**Showing:** {source_mix_summary(displayed)}")
+        acted_note = f" · {len(acted_ids)} acted on this session" if acted_ids else ""
+        st.markdown(f"**Showing:** {source_mix_summary(displayed)}{acted_note}")
 
         with st.expander("What do the numbers above mean? (for course graders)"):
             st.markdown(
                 f"""
 - **Interest match ({match_pct}%)** — Ranking quality metric (NDCG@10 = {ndcg_val:.3f}). Measures how well top results match your interest keywords.
 - **GitHub API / GitHub Archive in list** — How many of each source appear in the ranked pool of up to 100 items.
-- **Live from web** — Count of items with real API-scraped URLs (vs. offline `example.local` backup rows).
-- **Sort & filter** — Client-side view controls; does not re-run the ML model, only re-orders/filters the ranked pool.
+- **Data pool** — Snapshot mode ranks saved live API rows; backup mode ranks the full ≥10k offline dataset (including synthetic practice rows).
+- **Sort & filter** — Reorders/filters the ranked pool for display.
                 """
             )
 
         if filtered.empty:
-            hint = "Try **All sources**, **All data**, and **Any time**."
-            if origin_filter == "Offline practice data" and live_only:
+            hint = "Try **All sources**, **All opportunities**, and **Any time**."
+            if origin_filter == "Synthetic practice rows" and use_live_snapshot:
                 hint = (
-                    "Offline rows are excluded from ranking right now. In the sidebar, turn off "
-                    "**Rank from live API pool only**, then set **Live or offline → Offline practice data**."
+                    "Synthetic rows are excluded in snapshot mode. Turn off **Use saved live API snapshot** "
+                    "in the sidebar, then filter to **Synthetic practice rows**."
                 )
             elif source_filter == "GitHub Archive only" and pool_gha == 0:
-                hint = "Try loading the **Lina** or **David** persona — they surface more GitHub Archive events."
+                hint = "Try the **Lina** or **David** profile — they surface more GitHub Archive events."
             st.info(f"No results match your filters. {hint}")
         else:
+            if pending.empty and acted_ids:
+                st.info(
+                    f"You've acted on all visible opportunities ({len(acted_ids)} this session). "
+                    "Change filters, switch profiles, or clear activity in the sidebar to see more cards."
+                )
             for rank_idx, (_, row) in enumerate(displayed.iterrows(), start=1):
                 render_opportunity_card(
                     rank=rank_idx,
@@ -467,6 +590,7 @@ def main() -> None:
                     explain=_explain_row(row),
                     suggest=_suggest_action(row, user.interest_text),
                     key_prefix="disc",
+                    use_live_snapshot_pool=use_live_snapshot,
                 )
 
     with tab_bookmarks:
@@ -582,7 +706,7 @@ def main() -> None:
                 ranked_df=ranked,
                 trends_by_domain=trends.by_domain,
                 out_path=paths.data_dir / f"engagement_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                persona_name=persona,
+                persona_name=selected_profile,
                 cfg=BriefConfig(top_k=20),
                 rising_df=wow,
             )

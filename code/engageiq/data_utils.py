@@ -378,10 +378,35 @@ SOURCE_FILTER_OPTIONS: dict[str, str | None] = {
 }
 
 ORIGIN_FILTER_OPTIONS: dict[str, str | None] = {
-    "All data": None,
-    "Live from web": "live",
-    "Offline practice data": "offline",
+    "All opportunities": None,
+    "Saved from live API": "live",
+    "Synthetic practice rows": "offline",
 }
+
+
+def card_origin_label(url: str, *, use_live_snapshot_pool: bool) -> str:
+    """Human-readable data-pool label for opportunity cards."""
+    if use_live_snapshot_pool:
+        if is_live_url(url):
+            return "Saved live API snapshot"
+        return "Synthetic practice row"
+    if is_live_url(url):
+        return "Saved backup · from live API"
+    return "Saved backup · synthetic practice"
+
+
+def dataset_pool_summary(df: pd.DataFrame, *, use_live_snapshot_pool: bool) -> str:
+    live_n = int(live_mask(df).sum())
+    synth_n = len(df) - live_n
+    if use_live_snapshot_pool:
+        return (
+            f"Ranking pool: {live_n:,} saved live API rows from the last refresh "
+            f"(+ {synth_n:,} synthetic rows available when backup mode is on)"
+        )
+    return (
+        f"Ranking pool: full offline backup {len(df):,} rows "
+        f"({live_n:,} saved from live API + {synth_n:,} synthetic practice for grading)"
+    )
 
 
 def _engagement_rank_series(df: pd.DataFrame) -> pd.Series:
@@ -404,9 +429,9 @@ def filter_ranked_results(
     src_val = SOURCE_FILTER_OPTIONS.get(source, source)
     if src_val:
         out = out[out["source"].astype(str).str.lower() == src_val.lower()]
-    if origin == "Live from web" or origin == "Live API":
+    if origin == "Live from web" or origin == "Live API" or origin == "Saved from live API":
         out = out[live_mask(out)]
-    elif origin == "Offline practice data" or origin == "Offline backup":
+    elif origin in ("Offline practice data", "Offline backup", "Synthetic practice rows"):
         out = out[~live_mask(out)]
     if domains:
         dom_set = {d.strip() for d in domains if d.strip()}
