@@ -50,7 +50,7 @@ from engageiq.personas import (
 )
 from engageiq.ranking import RankConfig, augment_candidates, ndcg_at_k, profile_match_pct, rerank
 from engageiq.reinforcement_learning import EngagementRLAgent
-from engageiq.snapshot_ops import merge_live_refresh
+from engageiq.snapshot_ops import merge_live_refresh, write_snapshot_everywhere
 from engageiq.streaming import OpportunityStream
 from engageiq.suggestions import generate_suggestion, llm_configured, suggestion_provider
 from engageiq.ui import (
@@ -241,22 +241,7 @@ def _apply_pending_feedback(user: UserState) -> None:
 
 
 def _write_snapshot_everywhere(refreshed: pd.DataFrame, paths) -> None:
-    live_only = refreshed[live_mask(refreshed)]
-    snap_paths = {
-        paths.snapshot_csv,
-        paths.project_root / "data" / "opportunities_snapshot.csv",
-        paths.code_dir / "data" / "opportunities_snapshot.csv",
-    }
-    live_paths = {
-        paths.live_csv,
-        paths.code_dir / "data" / "live_opportunities.csv",
-    }
-    for snap_path in snap_paths:
-        snap_path.parent.mkdir(parents=True, exist_ok=True)
-        refreshed.to_csv(snap_path, index=False)
-    for live_path in live_paths:
-        live_path.parent.mkdir(parents=True, exist_ok=True)
-        live_only.to_csv(live_path, index=False)
+    write_snapshot_everywhere(refreshed, paths)
 
 
 def _chart(df: pd.DataFrame, mark_fn, encode_kwargs: dict) -> alt.Chart:
@@ -415,9 +400,12 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("**Data pool for ranking**")
+        if "use_live_snapshot" not in st.session_state:
+            # Local graders should start in offline bundled-CSV mode (toggle off).
+            st.session_state.use_live_snapshot = paths.is_cloud
         use_live_snapshot = st.toggle(
             "Use saved live API snapshot",
-            value=True,
+            key="use_live_snapshot",
             help=(
                 "ON: rank from the bundled live API snapshot CSV. "
                 f"OFF: rank from the full offline dataset ({len(df):,} rows, all live API URLs)."
@@ -425,8 +413,14 @@ def main() -> None:
         )
         if not use_live_snapshot:
             st.caption(
-                "Full snapshot mode: ranks the complete offline CSV (GitHub API + GitHub Archive, all real URLs)."
+                "Offline mode: ranks the bundled CSV from `data/` (GitHub API + GitHub Archive). "
+                "No live API calls unless you click refresh below."
             )
+            if not paths.is_cloud:
+                st.info(
+                    "📦 **Local offline grading** — using saved snapshot data only. "
+                    "Toggle stays off for the bundled ZIP workflow."
+                )
         else:
             st.caption(
                 "Snapshot mode: ranking uses live API rows from the bundled CSV. "
