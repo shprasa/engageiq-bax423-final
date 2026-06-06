@@ -1,22 +1,22 @@
 {
   "dataset": {
-    "dataset_rows": 12750,
-    "live_rows": 12750,
+    "dataset_rows": 18019,
+    "live_rows": 18019,
     "synthetic_rows": 0,
     "domains": 15,
     "sources": {
       "gharchive": 11842,
-      "github": 908
+      "github": 6177
     },
     "live_by_source": {
       "gharchive": 11842,
-      "github": 908
+      "github": 6177
     }
   },
   "ingest_benchmark": {
     "sources": {
       "gharchive": 11842,
-      "github": 908
+      "github": 6177
     },
     "domains_present": 15,
     "domains_required": 15,
@@ -29,12 +29,12 @@
       "persona": "Sofia (ML Student / Portfolio Builder)",
       "persona_type": "builtin",
       "ndcg10": 0.0,
-      "top10_github_gfi": 6,
+      "top10_github_gfi": 10,
       "top10_cpp_rust": 0,
       "top10_ml_hits": 10,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 0,
-      "profile_match_pct": 59,
+      "profile_match_pct": 78,
       "pass_sofia": true,
       "pass_david": false,
       "pass_lina": false,
@@ -72,7 +72,7 @@
       "top10_ml_hits": 0,
       "top10_infra_hits": 10,
       "top10_devtools_hits": 0,
-      "profile_match_pct": 67,
+      "profile_match_pct": 72,
       "pass_sofia": false,
       "pass_david": true,
       "pass_lina": false,
@@ -105,11 +105,11 @@
       "persona_type": "builtin",
       "ndcg10": 0.0,
       "top10_github_gfi": 0,
-      "top10_cpp_rust": 1,
+      "top10_cpp_rust": 2,
       "top10_ml_hits": 0,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 0,
-      "profile_match_pct": 66,
+      "profile_match_pct": 67,
       "pass_sofia": false,
       "pass_david": false,
       "pass_lina": true,
@@ -146,7 +146,7 @@
       "top10_ml_hits": 0,
       "top10_infra_hits": 0,
       "top10_devtools_hits": 10,
-      "profile_match_pct": 81,
+      "profile_match_pct": 85,
       "pass_sofia": false,
       "pass_david": false,
       "pass_lina": false,
@@ -182,14 +182,14 @@
     "ndcg@10_first10_avg": 1.0,
     "ndcg@10_last10_avg": 1.0,
     "ndcg@10_without_rl_last10": 1.0,
-    "ndcg_improvement": 0.925,
+    "ndcg_improvement": 0.775,
     "cumulative_reward_with_rl": 60.0,
-    "cumulative_reward_without_rl": 10.5,
+    "cumulative_reward_without_rl": 12.75,
     "avg_reward_last10_with_rl": 1.0,
-    "avg_reward_last10_without_rl": 0.075,
-    "reward_improvement_last10": 0.925,
+    "avg_reward_last10_without_rl": 0.225,
+    "reward_improvement_last10": 0.775,
     "session_reward_gain": 0.0,
-    "improvement": 0.925,
+    "improvement": 0.775,
     "policy_entropy": 2.687
   }
 }
