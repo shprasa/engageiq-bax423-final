@@ -23,5 +23,3 @@ certifi
 truststore
 
 python-dotenv
-
-python-docx
