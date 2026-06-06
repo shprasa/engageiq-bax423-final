@@ -33,8 +33,8 @@ py scripts/build_snapshot.py
 |------|-------------|
 | `code/` | Application source + `requirements.txt` |
 | `data/` | Offline snapshot CSV + benchmark results |
-| `brief.pdf` | Technical brief (≤4 pages) |
-| `prompts.md` | AI prompt iteration log |
+| `brief.docx` | Technical brief (≤4 pages) |
+| `prompts.md` | Key development prompts (v3) |
 
 ## BAX-423 techniques (2 implemented)
 
@@ -54,6 +54,6 @@ py scripts/build_snapshot.py
 
 ```bash
 py scripts/run_benchmarks.py      # persona + RL metrics → data/benchmark_results.json
-py scripts/generate_brief.py      # brief.pdf
 py scripts/user_test_loop.py      # rubric validation
+py scripts/package_submission.py  # Canvas ZIP
 ```
