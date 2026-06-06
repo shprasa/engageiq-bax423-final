@@ -1,13 +1,8 @@
 {
-  "passed": 14,
-  "failed": 1,
+  "passed": 15,
+  "failed": 0,
   "warnings": [],
-  "failures": [
-    {
-      "check": "persona_benchmarks",
-      "error": "Sofia (ML Student / Portfolio Builder) failed exact PDF criteria \u2014 failed: brief_under_1hr"
-    }
-  ],
+  "failures": [],
   "passed_checks": [
     "submission_files",
     "app_imports",
@@ -18,6 +13,7 @@
     "card_decision_info",
     "live_only_ranking",
     "plain_text_summaries",
+    "persona_benchmarks",
     "multi_source_ingest",
     "streaming_pipeline",
     "user_session_simulation",
