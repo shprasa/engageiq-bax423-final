@@ -132,3 +132,24 @@ def write_snapshot_bundle(df: pd.DataFrame, snapshot_csv: Path, live_csv: Path) 
     live_only = df[live_mask(df)].copy()
     live_only.to_csv(snapshot_csv, index=False)
     live_only.to_csv(live_csv, index=False)
+
+
+def write_snapshot_everywhere(df: pd.DataFrame, paths) -> None:
+    """Keep project data/ and code/data/ in sync (Streamlit Cloud reads code/data/)."""
+    live_only = df[live_mask(df)].copy()
+    snap_paths = {
+        paths.snapshot_csv,
+        paths.project_root / "data" / "opportunities_snapshot.csv",
+        paths.code_dir / "data" / "opportunities_snapshot.csv",
+    }
+    live_paths = {
+        paths.live_csv,
+        paths.project_root / "data" / "live_opportunities.csv",
+        paths.code_dir / "data" / "live_opportunities.csv",
+    }
+    for snap_path in snap_paths:
+        snap_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(snap_path, index=False)
+    for live_path in live_paths:
+        live_path.parent.mkdir(parents=True, exist_ok=True)
+        live_only.to_csv(live_path, index=False)
