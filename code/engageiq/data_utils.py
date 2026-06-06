@@ -394,7 +394,7 @@ def dataset_pool_summary(df: pd.DataFrame, *, use_live_snapshot_pool: bool) -> s
     live_n = int(live_mask(df).sum())
     if use_live_snapshot_pool:
         return f"Ranking pool: {live_n:,} live API rows from the bundled snapshot"
-    return f"Ranking pool: full offline snapshot ({live_n:,} live API rows)"
+    return f"Ranking pool: offline bundled snapshot ({live_n:,} saved rows, no live API calls)"
 
 
 def _engagement_rank_series(df: pd.DataFrame) -> pd.Series:
