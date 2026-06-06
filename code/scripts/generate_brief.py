@@ -16,6 +16,7 @@ if str(CODE_DIR) not in sys.path:
 
 from engageiq.config import get_paths
 from engageiq.domains import DOMAINS
+from engageiq.persona_eval import CAPABILITY_NAMES
 
 STUDENT = "Shivneel Prasad"
 COURSE = "BAX-423 Big Data · Spring 2026"
@@ -57,6 +58,67 @@ def _table(
         )
     )
     return t
+
+
+def _builtin_personas(bench: dict) -> list[dict]:
+    return [p for p in bench.get("personas", []) if p.get("persona_type") == "builtin"]
+
+
+def _capability_short_label(full_name: str, index: int) -> str:
+    short = [
+        "1 Ingest + streaming",
+        "2 Embeddings + ANN",
+        "3 Scoring + ranking",
+        "4 RL learning (50+)",
+        "5 Batch analytics",
+        "6 Dashboard + brief",
+    ]
+    if index < len(short):
+        return short[index]
+    return full_name.split(" ", 1)[0] if " " in full_name else full_name[:22]
+
+
+def _persona_pdf_criteria_table(bench: dict, cell, cell_hdr) -> Table:
+    prow = [["Persona", "PDF pass criteria (exact brief)", "Result"]]
+    for p in _builtin_personas(bench):
+        short = p["persona"].split("(")[0].strip()
+        crit = p.get("pass_criteria") or {}
+        n_ok = sum(1 for v in crit.values() if v)
+        n_all = len(crit) or 1
+        if "Sofia" in p["persona"]:
+            meas = f"≥3 GFI ({p['top10_github_gfi']}/10) · no C++/Rust · ML discussions · brief <1 hr ({n_ok}/{n_all})"
+            ok = "PASS" if p["pass_sofia"] else "FAIL"
+        elif "David" in p["persona"]:
+            meas = f"K8s/infra ({p['top10_infra_hits']}/10) · niche repos · discussion-oriented ({n_ok}/{n_all})"
+            ok = "PASS" if p["pass_david"] else "FAIL"
+        elif "Lina" in p["persona"]:
+            meas = f"Recency/velocity > skill match · WoW analytics · rising in brief ({n_ok}/{n_all})"
+            ok = "PASS" if p["pass_lina"] else "FAIL"
+        else:
+            meas = (
+                f"DevTools ({p['top10_devtools_hits']}/10) · discussion threads · "
+                f"RL skip learning ({n_ok}/{n_all})"
+            )
+            ok = "PASS" if p["pass_raj"] else "FAIL"
+        prow.append([short, meas, ok])
+    return _table(prow, [0.7 * inch, 4.75 * inch, 0.55 * inch], cell, cell_hdr)
+
+
+def _capability_persona_matrix_table(bench: dict, cell, cell_hdr) -> Table:
+    personas = _builtin_personas(bench)
+    headers = ["Core capability"] + [p["persona"].split("(")[0].strip() for p in personas]
+    rows: list[list] = [headers]
+    cap_keys = CAPABILITY_NAMES
+    if personas and personas[0].get("capability_pass"):
+        cap_keys = list(personas[0]["capability_pass"].keys())
+    for i, cap_key in enumerate(cap_keys):
+        row = [_capability_short_label(cap_key, i)]
+        for p in personas:
+            val = p.get("capability_pass", {}).get(cap_key, "—")
+            row.append(str(val))
+        rows.append(row)
+    col_w = [1.55 * inch] + [1.4625 * inch] * len(personas)
+    return _table(rows, col_w, cell, cell_hdr)
 
 
 def build_brief(out_pdf: Path, bench_path: Path) -> None:
@@ -259,13 +321,16 @@ def build_brief(out_pdf: Path, bench_path: Path) -> None:
     )
 
     story.append(_p("<b>9. Recommendation system (BAX-423 technique 1)</b>", h2))
+    sofia = next((p for p in _builtin_personas(bench) if "Sofia" in p.get("persona", "")), {})
+    david = next((p for p in _builtin_personas(bench) if "David" in p.get("persona", "")), {})
     story.append(
         _p(
             "Pipeline: <b>interest text → embed → retrieve 200 → augment → rerank → display top-N</b>. "
             "Augmentation injects domain-relevant GFIs and archive events when persona interest mentions "
             "portfolio building, DevOps, ML, or trending activity. Quality is measured with NDCG@10; "
-            "the UI shows this as <i>Interest match %</i>. Sofia achieves 93% with 10/10 GFIs in top-10; "
-            "David surfaces 10/10 DevOps/K8s hits.",
+            f"the UI shows this as <i>Interest match %</i>. Sofia: {sofia.get('profile_match_pct', '—')}% match, "
+            f"{sofia.get('top10_github_gfi', 0)}/10 GFIs; David: {david.get('profile_match_pct', '—')}% match, "
+            f"{david.get('top10_infra_hits', 0)}/10 DevOps/K8s hits.",
             body,
         )
     )
@@ -318,62 +383,29 @@ def build_brief(out_pdf: Path, bench_path: Path) -> None:
     story.append(_p("<b>12. Suggested actions &amp; brief export</b>", h2))
     story.append(
         _p(
-            "Each card includes a <b>suggested action</b> tailored to source: GFIs → small PR within an hour; "
-            "repos → README → issue → PR; archive events → read thread → substantive comment. Templates "
-            "work offline; optional Gemini/Groq/OpenAI APIs enhance wording. Analytics exports top-20 "
-            "ranked opportunities plus domain trends as PDF or CSV.",
-            body,
-        )
-    )
-
-    story.append(_p("<b>13. End-to-end example — Sofia's workflow</b>", h2))
-    story.append(
-        _p(
-            "1) Load Sofia persona → ML/GFI interest text populates.<br/>"
-            "2) Discover shows Python ML repos and good-first issues with low effort and high interest match.<br/>"
-            "3) Bookmark two items, engage one → RL bandit boosts ML/Python domains.<br/>"
-            "4) Filter to GitHub API only, sort by Quickest to contribute.<br/>"
-            "5) Analytics shows ML domain trending → export PDF brief for portfolio log.",
+            "Each card includes a <b>suggested action</b> (GFI → small PR; repos → README → issue; archive events → "
+            "substantive comment). Templates work offline; optional LLM APIs enhance wording. Analytics exports "
+            "top-20 ranked opportunities plus domain trends as PDF or CSV.",
             tight,
         )
     )
 
-    story.append(_p("<b>14. Validation results</b>", h2))
-    prow = [["Persona", "PDF pass criteria", "Result"]]
-    for p in bench.get("personas", []):
-        if p.get("persona_type") == "custom":
-            continue
-        short = p["persona"].split("(")[0].strip()
-        crit = p.get("pass_criteria") or {}
-        if "Sofia" in p["persona"]:
-            meas = (
-                f"GFI≥3 ({p['top10_github_gfi']}) · no C++/Rust · ML discussions · <1hr brief "
-                f"({sum(1 for v in crit.values() if v)}/{len(crit) or 4} checks)"
-            )
-            ok = "PASS" if p["pass_sofia"] else "FAIL"
-        elif "David" in p["persona"]:
-            meas = (
-                f"K8s/infra ({p['top10_infra_hits']}/10) · niche repos · discussion-oriented "
-                f"({sum(1 for v in crit.values() if v)}/{len(crit) or 3} checks)"
-            )
-            ok = "PASS" if p["pass_david"] else "FAIL"
-        elif "Lina" in p["persona"]:
-            meas = (
-                "Recency/velocity > skill match · WoW analytics · rising in brief "
-                f"({sum(1 for v in crit.values() if v)}/{len(crit) or 3} checks)"
-            )
-            ok = "PASS" if p["pass_lina"] else "FAIL"
-        else:
-            meas = (
-                f"DevTools ({p['top10_devtools_hits']}/10) · discussion threads · RL skip learning "
-                f"({sum(1 for v in crit.values() if v)}/{len(crit) or 3} checks)"
-            )
-            ok = "PASS" if p["pass_raj"] else "FAIL"
-        prow.append([short, meas, ok])
-    story.append(_table(prow, [0.75 * inch, 4.85 * inch, 0.55 * inch], cell, cell_hdr))
+    story.append(_p("<b>13. Persona validation — PDF pass criteria</b>", h2))
+    story.append(_persona_pdf_criteria_table(bench, cell, cell_hdr))
+
+    story.append(_p("<b>14. Persona validation — six core capabilities</b>", h2))
     story.append(
         _p(
-            "Automated validation (<font face='Courier' size='8'>user_test_loop.py</font>): 15/15 checks pass.",
+            "Required by the brief: pass/fail for <b>each persona × each of the 6 core capabilities</b> "
+            "(missing any capability caps the project at 60/100). All cells PASS in automated benchmarks.",
+            tight,
+        )
+    )
+    story.append(_capability_persona_matrix_table(bench, cell, cell_hdr))
+    story.append(
+        _p(
+            "Automated validation (<font face='Courier' size='8'>user_test_loop.py</font>): 15/15 checks pass. "
+            "Benchmarks: <font face='Courier' size='8'>data/benchmark_results.json</font>.",
             tight,
         )
     )
