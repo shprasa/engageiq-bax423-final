@@ -91,7 +91,7 @@ def load_dataframe() -> tuple[pd.DataFrame, OpportunityStore]:
 def check_submission_files(report: Report) -> None:
     name = "submission_files"
     required = [
-        PROJECT_ROOT / "brief.pdf",
+        PROJECT_ROOT / "brief.docx",
         PROJECT_ROOT / "prompts.md",
         CODE_DIR / "requirements.txt",
         CODE_DIR / "README.md",
@@ -502,7 +502,7 @@ def print_report(report: Report, round_num: int) -> None:
 def refresh_artifacts() -> None:
     """Regenerate benchmarks, brief, and ZIP after fixes."""
     scripts = CODE_DIR / "scripts"
-    for script in ("run_benchmarks.py", "generate_brief.py", "package_submission.py"):
+    for script in ("run_benchmarks.py", "package_submission.py"):
         path = scripts / script
         if path.exists():
             print(f"Running {script}…")
