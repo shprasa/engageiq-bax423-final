@@ -24,11 +24,15 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
 
 
+def _num_series(df: pd.DataFrame, col: str) -> np.ndarray:
+    return pd.to_numeric(df[col], errors="coerce").fillna(0).astype(float).to_numpy()
+
+
 def score_health(df: pd.DataFrame) -> np.ndarray:
-    up = df["upvotes"].fillna(0).astype(float).to_numpy()
-    com = df["comments"].fillna(0).astype(float).to_numpy()
-    stars = df["stars"].fillna(0).astype(float).to_numpy()
-    forks = df["forks"].fillna(0).astype(float).to_numpy()
+    up = _num_series(df, "upvotes")
+    com = _num_series(df, "comments")
+    stars = _num_series(df, "stars")
+    forks = _num_series(df, "forks")
     is_gha = df["source"].astype(str).str.lower().eq("gharchive").to_numpy()
 
     s_gh = 0.35 * np.log1p(up) + 0.25 * np.log1p(com) + 0.25 * np.log1p(stars) + 0.15 * np.log1p(forks)
@@ -38,9 +42,9 @@ def score_health(df: pd.DataFrame) -> np.ndarray:
 
 
 def score_visibility(df: pd.DataFrame) -> np.ndarray:
-    up = df["upvotes"].fillna(0).astype(float).to_numpy()
-    com = df["comments"].fillna(0).astype(float).to_numpy()
-    stars = df["stars"].fillna(0).astype(float).to_numpy()
+    up = _num_series(df, "upvotes")
+    com = _num_series(df, "comments")
+    stars = _num_series(df, "stars")
     is_gha = df["source"].astype(str).str.lower().eq("gharchive").to_numpy()
 
     raw_gh = 0.5 * np.log1p(up) + 0.35 * np.log1p(com) + 0.15 * np.log1p(stars)
@@ -51,9 +55,9 @@ def score_visibility(df: pd.DataFrame) -> np.ndarray:
 
 def score_effort(df: pd.DataFrame) -> np.ndarray:
     # proxy: more comments/issues => more effort; "good first issue" reduces effort
-    com = df["comments"].fillna(0).astype(float).to_numpy()
-    issues = df["issues_open"].fillna(0).astype(float).to_numpy()
-    gfi = df["good_first_issue"].fillna(0).astype(float).to_numpy()
+    com = _num_series(df, "comments")
+    issues = _num_series(df, "issues_open")
+    gfi = _num_series(df, "good_first_issue")
 
     raw = 0.5 * np.log1p(com) + 0.5 * np.log1p(issues) - 0.75 * gfi
     eff = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
@@ -166,7 +170,10 @@ def rerank(
     recency = score_recency(candidates)
 
     trend_mode = any(k in interest_text.lower() for k in ("trend", "velocity", "viral", "recency"))
-    portfolio_mode = any(k in interest_text.lower() for k in ("good first issue", "beginner", "portfolio"))
+    portfolio_mode = any(
+        k in interest_text.lower()
+        for k in ("good first issue", "beginner", "portfolio", "beginner-friendly")
+    )
     devops_mode = any(
         k in interest_text.lower() for k in ("kubernetes", "terraform", "devops", "ci/cd", "observability")
     )
@@ -276,7 +283,10 @@ def rerank(
             + 0.18 * gha_boost
         )
         if portfolio_mode:
-            final = final + 0.10 * (1.0 - effort)
+            final = final + 0.22 * (1.0 - effort)
+            # Keep Sofia top-10 quick-start: deprioritize high-effort items unless GFI-tagged
+            slow = (effort >= 0.35) & (gfi_boost <= 0)
+            final = np.where(slow, final - 0.55, final)
 
     # Prefer real API-sourced URLs over offline synthetic backup rows
     live = ~candidates["url"].astype(str).str.contains("example.local", na=False)

@@ -21,9 +21,8 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
-def _search_repos(token: str, query: str, per_page: int = 30) -> list[dict]:
-    url = f"{GITHUB_API}/search/repositories"
-    params = {"q": query, "sort": "stars", "order": "desc", "per_page": per_page}
+def _search(token: str, endpoint: str, params: dict) -> list[dict]:
+    url = f"{GITHUB_API}/search/{endpoint}"
     r = http_get(url, headers=_headers(token), params=params, timeout=30)
     if r.status_code == 403:
         reset = r.headers.get("X-RateLimit-Reset")
@@ -35,22 +34,49 @@ def _search_repos(token: str, query: str, per_page: int = 30) -> list[dict]:
     return r.json().get("items", [])
 
 
-def _search_issues(token: str, query: str, per_page: int = 20) -> list[dict]:
-    url = f"{GITHUB_API}/search/issues"
-    params = {"q": query, "sort": "updated", "order": "desc", "per_page": per_page}
-    r = http_get(url, headers=_headers(token), params=params, timeout=30)
-    if r.status_code == 403:
-        time.sleep(10)
-        r = http_get(url, headers=_headers(token), params=params, timeout=30)
-    r.raise_for_status()
-    return r.json().get("items", [])
+def _search_repos(token: str, query: str, *, per_page: int = 100, max_pages: int = 3) -> list[dict]:
+    items: list[dict] = []
+    for page in range(1, max_pages + 1):
+        batch = _search(
+            token,
+            "repositories",
+            {"q": query, "sort": "stars", "order": "desc", "per_page": per_page, "page": page},
+        )
+        if not batch:
+            break
+        items.extend(batch)
+        if len(batch) < per_page:
+            break
+        time.sleep(2)
+    return items
+
+
+def _search_issues(token: str, query: str, *, per_page: int = 100, max_pages: int = 2) -> list[dict]:
+    items: list[dict] = []
+    for page in range(1, max_pages + 1):
+        try:
+            batch = _search(
+                token,
+                "issues",
+                {"q": query, "sort": "updated", "order": "desc", "per_page": per_page, "page": page},
+            )
+        except (requests.HTTPError, requests.RequestException):
+            break
+        if not batch:
+            break
+        items.extend(batch)
+        if len(batch) < per_page:
+            break
+        time.sleep(2)
+    return items
 
 
 def scrape_github(per_domain: int = 250) -> pd.DataFrame:
     token = require_github_token()
     rows: list[dict] = []
     row_id = 1_000_000
-    print(f"  GitHub: up to {per_domain} items x {len(DOMAINS)} domains (~2-4 sec per search)", flush=True)
+    seen_urls: set[str] = set()
+    print(f"  GitHub: up to {per_domain} items x {len(DOMAINS)} domains", flush=True)
 
     for di, domain in enumerate(DOMAINS, start=1):
         print(f"  GitHub: domain {di}/{len(DOMAINS)} — {domain}", flush=True)
@@ -60,7 +86,7 @@ def scrape_github(per_domain: int = 250) -> pd.DataFrame:
             if collected >= per_domain:
                 break
             try:
-                repos = _search_repos(token, f"{kw} stars:>50", per_page=30)
+                repos = _search_repos(token, f"{kw} stars:>50", per_page=100, max_pages=3)
             except (requests.HTTPError, requests.RequestException):
                 time.sleep(12)
                 continue
@@ -68,6 +94,10 @@ def scrape_github(per_domain: int = 250) -> pd.DataFrame:
             for repo in repos:
                 if collected >= per_domain:
                     break
+                url = str(repo.get("html_url") or "")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
                 labels = [lbl.get("name", "").lower() for lbl in repo.get("labels", [])]
                 gfi = 1 if "good first issue" in labels else 0
                 created = repo.get("created_at") or datetime.now(timezone.utc).isoformat()
@@ -78,7 +108,7 @@ def scrape_github(per_domain: int = 250) -> pd.DataFrame:
                         "domain": domain,
                         "title": repo.get("full_name", repo.get("name", "")),
                         "text": (repo.get("description") or "")[:2000],
-                        "url": repo.get("html_url", ""),
+                        "url": url,
                         "community": repo.get("full_name", ""),
                         "created_at": created.replace("Z", ""),
                         "upvotes": int(repo.get("stargazers_count") or 0),
@@ -95,19 +125,23 @@ def scrape_github(per_domain: int = 250) -> pd.DataFrame:
                 collected += 1
             time.sleep(2)
 
-            # Also pull a few good-first-issue items per domain
             try:
                 issues = _search_issues(
                     token,
                     f'label:"good first issue" {kw} state:open',
-                    per_page=10,
+                    per_page=100,
+                    max_pages=2,
                 )
             except (requests.HTTPError, requests.RequestException):
                 issues = []
 
-            for issue in issues[:5]:
+            for issue in issues:
                 if collected >= per_domain:
                     break
+                url = str(issue.get("html_url") or "")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
                 repo_name = (issue.get("repository_url") or "").split("/repos/")[-1]
                 rows.append(
                     {
@@ -116,7 +150,7 @@ def scrape_github(per_domain: int = 250) -> pd.DataFrame:
                         "domain": domain,
                         "title": issue.get("title", ""),
                         "text": (issue.get("body") or "")[:2000],
-                        "url": issue.get("html_url", ""),
+                        "url": url,
                         "community": repo_name,
                         "created_at": (issue.get("created_at") or "").replace("Z", ""),
                         "upvotes": int(issue.get("comments") or 0),

@@ -124,17 +124,29 @@ def _event_to_row(event: dict, row_id: int, fallback_idx: int) -> dict | None:
     }
 
 
-def scrape_gharchive(hours_back: int = 6, max_events: int = 2500, archive_lag_hours: int = 2) -> pd.DataFrame:
-    """Download recent GH Archive hourly files and extract engagement events."""
+def scrape_gharchive(
+    hours_back: int = 6,
+    max_events: int = 2500,
+    archive_lag_hours: int = 2,
+    target_rows: int = 0,
+) -> pd.DataFrame:
+    """Download recent GH Archive hourly files and extract engagement events.
+
+    max_events=0 means no row cap. target_rows>0 stops once enough rows are collected.
+    """
     end = datetime.now(timezone.utc) - timedelta(hours=archive_lag_hours)
     rows: list[dict] = []
     row_id = 3_000_000
     seen_urls: set[str] = set()
+    cap = None if max_events <= 0 else max_events
 
-    print(f"  GH Archive: scanning last {hours_back} hour(s) (max {max_events} events)...", flush=True)
+    cap_label = "no limit" if cap is None else str(cap)
+    print(f"  GH Archive: scanning last {hours_back} hour(s) (max {cap_label} events)...", flush=True)
 
     for hour_offset in range(hours_back):
-        if len(rows) >= max_events:
+        if cap is not None and len(rows) >= cap:
+            break
+        if target_rows > 0 and len(rows) >= target_rows:
             break
         dt = end - timedelta(hours=hour_offset)
         url = f"{GHARCHIVE_BASE}/{dt.year:04d}-{dt.month:02d}-{dt.day:02d}-{dt.hour}.json.gz"
@@ -149,7 +161,9 @@ def scrape_gharchive(hours_back: int = 6, max_events: int = 2500, archive_lag_ho
         try:
             with gzip.GzipFile(fileobj=io.BytesIO(resp.content)) as gz:
                 for line_no, raw_line in enumerate(gz, start=1):
-                    if len(rows) >= max_events:
+                    if cap is not None and len(rows) >= cap:
+                        break
+                    if target_rows > 0 and len(rows) >= target_rows:
                         break
                     try:
                         event = json.loads(raw_line)

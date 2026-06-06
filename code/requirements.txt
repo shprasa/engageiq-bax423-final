@@ -24,3 +24,4 @@ truststore
 
 python-dotenv
 
+python-docx

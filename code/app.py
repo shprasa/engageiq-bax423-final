@@ -419,20 +419,18 @@ def main() -> None:
             "Use saved live API snapshot",
             value=True,
             help=(
-                "ON: rank from opportunities saved during the last live GitHub API + GitHub Archive call "
-                f"({live_n:,} rows in the bundled CSV). OFF: rank from the full offline backup dataset "
-                f"({len(df):,} rows total, including synthetic practice rows for ≥10k grading)."
+                "ON: rank from the bundled live API snapshot CSV. "
+                f"OFF: rank from the full offline dataset ({len(df):,} rows, all live API URLs)."
             ),
         )
         if not use_live_snapshot:
             st.caption(
-                "Backup mode: previously live API rows are treated as saved backup opportunities, "
-                "alongside synthetic practice rows (example.local)."
+                "Full snapshot mode: ranks the complete offline CSV (GitHub API + GitHub Archive, all real URLs)."
             )
         else:
             st.caption(
-                "Snapshot mode: ranking uses real URLs saved from the last API refresh. "
-                "Turn off to browse the full offline grading dataset. "
+                "Snapshot mode: ranking uses live API rows from the bundled CSV. "
+                "Turn off to browse the full offline dataset. "
                 "**Refresh live API data now** also regenerates persona benchmarks."
             )
 
@@ -598,8 +596,7 @@ def main() -> None:
             "Data origin",
             options=list(ORIGIN_FILTER_OPTIONS.keys()),
             help=(
-                "Saved from live API = real URLs from the last API refresh. "
-                "Synthetic practice rows = example.local backup rows for offline grading."
+                "All rows are live API URLs. Filter by source platform if needed."
             ),
         )
         max_effort = r1c4.selectbox(
@@ -638,18 +635,15 @@ def main() -> None:
                 f"""
 - **Interest match ({match_pct}%)** — Average persona-aware fit of your top-10 results (embedding similarity plus profile signals such as visibility for trend-spotting or DevOps domain fit). Keyword NDCG@10 = {ndcg_val:.3f}.
 - **GitHub API / GitHub Archive in list** — How many of each source appear in the ranked pool of up to 100 items.
-- **Data pool** — Snapshot mode ranks saved live API rows; backup mode ranks the full ≥10k offline dataset (including synthetic practice rows).
+- **Data pool** — Snapshot mode and full-dataset mode both use the same live API snapshot (no synthetic padding).
 - **Sort & filter** — Reorders/filters the ranked pool for display.
                 """
             )
 
         if filtered.empty:
             hint = "Try **All sources**, **All opportunities**, and **Any time**."
-            if origin_filter == "Synthetic practice rows" and use_live_snapshot:
-                hint = (
-                    "Synthetic rows are excluded in snapshot mode. Turn off **Use saved live API snapshot** "
-                    "in the sidebar, then filter to **Synthetic practice rows**."
-                )
+            if origin_filter == "Live API URLs only" and live_in_results == 0:
+                hint = "No live URLs in the current ranked pool. Try **All opportunities** or a different profile."
             elif source_filter == "GitHub Archive only" and pool_gha == 0:
                 hint = "Try the **Lina** or **David** profile — they surface more GitHub Archive events."
             st.info(f"No results match your filters. {hint}")

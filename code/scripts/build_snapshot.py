@@ -11,192 +11,166 @@ if str(CODE_DIR) not in sys.path:
     sys.path.insert(0, str(CODE_DIR))
 
 from engageiq.config import get_paths
-from engageiq.domains import DOMAINS
+from engageiq.data_utils import live_mask
 from engageiq.scrape_github import scrape_github
 from engageiq.scrape_gharchive import scrape_gharchive
 
 SOURCES = ("github", "gharchive")
 
+SCHEMA_COLS = [
+    "id",
+    "source",
+    "domain",
+    "title",
+    "text",
+    "url",
+    "community",
+    "created_at",
+    "upvotes",
+    "comments",
+    "author",
+    "lang",
+    "stars",
+    "forks",
+    "issues_open",
+    "good_first_issue",
+]
+
 
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
-    cols = [
-        "id",
-        "source",
-        "domain",
-        "title",
-        "text",
-        "url",
-        "community",
-        "created_at",
-        "upvotes",
-        "comments",
-        "author",
-        "lang",
-        "stars",
-        "forks",
-        "issues_open",
-        "good_first_issue",
-    ]
-    for c in cols:
+    for c in SCHEMA_COLS:
         if c not in df.columns:
             df[c] = ""
-    return df[cols].copy()
+    out = df[SCHEMA_COLS].copy()
+    for num_col in ("upvotes", "comments", "stars", "forks", "issues_open", "good_first_issue"):
+        out[num_col] = pd.to_numeric(out[num_col], errors="coerce").fillna(0)
+    return out[live_mask(out)].drop_duplicates(subset=["url"], keep="first")
 
 
-def _generate_synthetic(source: str, count: int, start_id: int) -> pd.DataFrame:
-    rows: list[dict] = []
-    for i in range(count):
-        domain = DOMAINS[i % len(DOMAINS)]
-        n = i + 1
-        if source == "gharchive":
-            rows.append(
-                {
-                    "id": start_id + i,
-                    "source": "gharchive",
-                    "domain": domain,
-                    "title": f"{domain} - GH Archive event {n}",
-                    "text": f"Looking for insights on {domain}. Source=gharchive. Event seed {n}.",
-                    "url": f"https://example.local/gharchive/{n}",
-                    "community": f"github.com/archive-{domain.replace('/', '-')}",
-                    "created_at": "2026-01-01T00:00:00",
-                    "upvotes": 0,
-                    "comments": i % 40,
-                    "author": "gharchive-bot",
-                    "lang": "",
-                    "stars": "",
-                    "forks": "",
-                    "issues_open": "",
-                    "good_first_issue": 1 if i % 7 == 0 else 0,
-                }
-            )
-        else:
-            rows.append(
-                {
-                    "id": start_id + i,
-                    "source": "github",
-                    "domain": domain,
-                    "title": f"{domain} - Opportunity {n}",
-                    "text": f"Looking for insights on {domain}. Source=github. Topic seed {n}.",
-                    "url": f"https://example.local/github/{n}",
-                    "community": f"github.com/example-{n}",
-                    "created_at": "2026-01-01T00:00:00",
-                    "upvotes": 10 + (i % 50),
-                    "comments": i % 20,
-                    "author": "example-user",
-                    "lang": "Python",
-                    "stars": 100 + i,
-                    "forks": i % 30,
-                    "issues_open": i % 15,
-                    "good_first_issue": 1 if i % 5 == 0 else 0,
-                }
-            )
-    return pd.DataFrame(rows)
+def _merge_parts(parts: list[pd.DataFrame]) -> pd.DataFrame:
+    live_parts = [_normalize(p) for p in parts if p is not None and not p.empty]
+    if not live_parts:
+        return pd.DataFrame(columns=SCHEMA_COLS)
+    df = pd.concat(live_parts, ignore_index=True)
+    return df.drop_duplicates(subset=["url"], keep="first").reset_index(drop=True)
 
 
 def build_snapshot(
     out_csv: Path,
-    synthetic_csv: Path | None,
-    github_per_domain: int = 100,
-    gharchive_hours: int = 6,
-    gharchive_max: int = 2500,
-    min_rows: int = 10000,
+    *,
+    github_per_domain: int = 400,
+    gharchive_hours: int = 168,
+    gharchive_max: int = 0,
+    min_rows: int = 10_000,
 ) -> pd.DataFrame:
+    """Build an offline snapshot from live API scrapes only (no synthetic padding)."""
     parts: list[pd.DataFrame] = []
 
-    print("Scraping GitHub Archive (no auth)...")
-    gha_df = _normalize(scrape_gharchive(hours_back=gharchive_hours, max_events=gharchive_max))
-    gha_df["data_origin"] = "live"
-    print(f"  GH Archive rows: {len(gha_df)}")
-    if not gha_df.empty:
-        parts.append(gha_df)
+    if out_csv.exists():
+        existing = _normalize(pd.read_csv(out_csv))
+        if not existing.empty:
+            parts.append(existing)
+            print(f"Loaded {len(existing):,} existing live rows from {out_csv.name}")
 
-    print("Scraping GitHub API (GITHUB_TOKEN required)...")
-    try:
-        gh_df = _normalize(scrape_github(per_domain=github_per_domain))
-        gh_df["data_origin"] = "live"
-        print(f"  GitHub rows: {len(gh_df)}")
-        parts.append(gh_df)
-    except Exception as exc:
-        print(f"  GitHub scrape skipped: {exc}")
+    df = _merge_parts(parts)
 
-    live_df = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-    if not live_df.empty:
-        live_df = live_df.drop_duplicates(subset=["url"], keep="first")
-
-    synthetic_df = pd.DataFrame()
-    if synthetic_csv and synthetic_csv.exists():
-        synthetic_df = _normalize(pd.read_csv(synthetic_csv))
-        synthetic_df = synthetic_df[synthetic_df["source"].isin(SOURCES)]
-        synthetic_df["data_origin"] = "synthetic"
-        print(f"Synthetic backup rows: {len(synthetic_df)}")
-
-    if live_df.empty:
-        df = synthetic_df
-    elif synthetic_df.empty:
-        df = live_df
-    else:
-        live_urls = set(live_df["url"].astype(str))
-        synthetic_df = synthetic_df[~synthetic_df["url"].astype(str).isin(live_urls)]
-        df = pd.concat([live_df, synthetic_df], ignore_index=True)
-
-    df = df.drop_duplicates(subset=["url"], keep="first").reset_index(drop=True)
-
-    # Pad with synthetic rows per source to reach min_rows.
-    while len(df) < min_rows:
+    if len(df) < min_rows:
         need = min_rows - len(df)
-        per_source = max(need // 2, 1)
-        start_id = int(df["id"].max()) + 1 if len(df) else 1
-        pad = pd.concat(
-            [
-                _generate_synthetic("github", per_source, start_id),
-                _generate_synthetic("gharchive", per_source, start_id + per_source),
-            ],
-            ignore_index=True,
+        print(f"Scraping GitHub Archive until >= {min_rows:,} total rows (need ~{need:,} more)...")
+        gha_df = scrape_gharchive(
+            hours_back=max(gharchive_hours, 168),
+            max_events=gharchive_max,
+            target_rows=max(need + 500, min_rows),
         )
-        df = pd.concat([df, pad], ignore_index=True).drop_duplicates(subset=["url"], keep="first")
+        print(f"  GH Archive live rows: {len(gha_df):,}")
+        if not gha_df.empty:
+            parts.append(gha_df)
+        df = _merge_parts(parts)
+        print(f"Combined live total after GH Archive: {len(df):,} rows")
+
+    if len(df) < min_rows:
+        print("Scraping GitHub API (GITHUB_TOKEN required)...")
+        try:
+            gh_df = scrape_github(per_domain=github_per_domain)
+            print(f"  GitHub API live rows: {len(gh_df):,}")
+            if not gh_df.empty:
+                parts.append(gh_df)
+        except Exception as exc:
+            print(f"  GitHub scrape failed: {exc}")
+        df = _merge_parts(parts)
+        print(f"Combined live total after GitHub API: {len(df):,} rows")
+
+    if len(df) < min_rows:
+        print("Extending GH Archive to 720 hours...")
+        gha_df = scrape_gharchive(hours_back=720, max_events=gharchive_max, target_rows=min_rows)
+        if not gha_df.empty:
+            parts.append(gha_df)
+        df = _merge_parts(parts)
+
+    if len(df) < min_rows:
+        raise RuntimeError(
+            f"Collected only {len(df):,} live rows (need >= {min_rows:,}). "
+            "Increase --gharchive-hours, --github-per-domain, or check GITHUB_TOKEN/network."
+        )
+
+    github_n = int((df["source"].astype(str).str.lower() == "github").sum())
+    if github_n < 3000:
+        print(f"Adding GitHub API rows (currently {github_n:,}; target >= 3,000)...")
+        try:
+            gh_df = scrape_github(per_domain=github_per_domain)
+            if not gh_df.empty:
+                parts.append(gh_df)
+                df = _merge_parts(parts)
+                github_n = int((df["source"].astype(str).str.lower() == "github").sum())
+                print(f"Combined live total after GitHub API top-up: {len(df):,} rows ({github_n:,} GitHub API)")
+        except Exception as exc:
+            print(f"  GitHub top-up skipped: {exc}")
 
     df["id"] = range(1, len(df) + 1)
-
-    if "data_origin" in df.columns:
-        print("Origin mix:", df["data_origin"].value_counts().to_dict())
     print("Domain count:", df["domain"].nunique())
     print("Source mix:", df["source"].value_counts().to_dict())
+    print("Live rows only:", int(live_mask(df).sum()), f"/ {len(df)}")
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    df.drop(columns=["data_origin"], errors="ignore").to_csv(out_csv, index=False)
-    print(f"Wrote {len(df)} rows -> {out_csv}")
+    df.to_csv(out_csv, index=False)
+    print(f"Wrote {len(df):,} live rows -> {out_csv}")
     return df
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build EngageIQ offline snapshot from live APIs")
+    parser = argparse.ArgumentParser(description="Build EngageIQ offline snapshot (live API data only)")
     parser.add_argument("--out", type=str, default="", help="Output CSV path")
-    parser.add_argument("--synthetic", type=str, default="", help="Synthetic CSV to merge")
-    parser.add_argument("--github-per-domain", type=int, default=100)
-    parser.add_argument("--gharchive-hours", type=int, default=6)
-    parser.add_argument("--gharchive-max", type=int, default=2500)
+    parser.add_argument("--github-per-domain", type=int, default=400)
+    parser.add_argument("--gharchive-hours", type=int, default=168, help="Max GH Archive history window in hours")
+    parser.add_argument(
+        "--gharchive-max",
+        type=int,
+        default=0,
+        help="Max GH Archive events (0 = no limit)",
+    )
+    parser.add_argument("--min-rows", type=int, default=10_000)
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="Quick scrape: 2 gharchive hours, github-per-domain=30",
+        help="Quick scrape for dev (still live-only; may fail min_rows check)",
     )
     args = parser.parse_args()
 
     if args.fast:
-        args.gharchive_hours = 2
-        args.gharchive_max = 800
-        args.github_per_domain = 30
-        print("FAST MODE: smaller live sample + synthetic padding to 10k", flush=True)
+        args.gharchive_hours = 48
+        args.gharchive_max = 5000
+        args.github_per_domain = 80
+        args.min_rows = 500
+        print("FAST MODE: smaller live scrape only", flush=True)
 
     paths = get_paths()
     out = Path(args.out) if args.out else paths.snapshot_csv
-    synthetic = Path(args.synthetic) if args.synthetic else paths.data_dir / "opportunities_snapshot_synthetic.csv"
     df = build_snapshot(
         out_csv=out,
-        synthetic_csv=synthetic if synthetic.exists() else None,
         github_per_domain=args.github_per_domain,
         gharchive_hours=args.gharchive_hours,
         gharchive_max=args.gharchive_max,
+        min_rows=args.min_rows,
     )
 
     from engageiq.benchmark_ops import benchmark_summary, run_and_write_benchmarks
