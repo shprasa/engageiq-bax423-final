@@ -44,12 +44,10 @@ SKIP_NAMES = {
     "_tmp_prompts_extract.txt",
     "Prasad_Shivneel_BAX423_Final.zip",
 }
-# Root data/ CSV mirrors code/data/ for the Canvas ZIP; GitHub deploy reads code/data/.
 SKIP_IF_DUPLICATE = {
     "data/opportunities_snapshot.csv": "code/data/opportunities_snapshot.csv",
     "data/live_opportunities.csv": "code/data/live_opportunities.csv",
 }
-LARGE_FILE_BYTES = 5 * 1024 * 1024
 TEXT_EXT = {
     ".py", ".md", ".txt", ".toml", ".json", ".gitignore", ".example", ".template",
 }
@@ -68,76 +66,48 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _should_include(path: Path, root: Path) -> bool:
+    rel = path.relative_to(root)
+    if any(part in SKIP_DIRS for part in rel.parts):
+        return False
+    if path.name in SKIP_NAMES:
+        return False
+    if path.suffix in {".duckdb", ".wal", ".pyc"}:
+        return False
+    dup = SKIP_IF_DUPLICATE.get(rel.as_posix())
+    if dup:
+        other = root / dup
+        if other.exists() and _file_hash(path) == _file_hash(other):
+            return False
+    return True
+
+
 def _collect_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(root)
-        if any(part in SKIP_DIRS for part in rel.parts):
-            continue
-        if path.name in SKIP_NAMES:
-            continue
-        if path.suffix in {".duckdb", ".wal", ".pyc"}:
-            continue
-        dup = SKIP_IF_DUPLICATE.get(rel.as_posix())
-        if dup:
-            other = root / dup
-            if other.exists() and _file_hash(path) == _file_hash(other):
-                print(f"  skip duplicate {rel.as_posix()} (same as {dup})")
-                continue
-        files.append(path)
+        if path.is_file() and _should_include(path, root):
+            files.append(path)
     return sorted(files)
 
 
-def _encode_file(path: Path) -> str:
-    return base64.b64encode(path.read_bytes()).decode("ascii")
+def _file_content(path: Path) -> tuple[str, str]:
+    ext = path.suffix.lower()
+    if ext in BINARY_EXT:
+        raw = path.read_bytes()
+        return base64.b64encode(raw).decode("ascii"), "base64"
+    if ext in TEXT_EXT or ext == "":
+        try:
+            return path.read_text(encoding="utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            pass
+    raw = path.read_bytes()
+    return base64.b64encode(raw).decode("ascii"), "base64"
 
 
 def _api(token: str, method: str, url: str, **kwargs) -> requests.Response:
     kwargs.setdefault("verify", certifi.where())
-    timeout = kwargs.pop("timeout", 120)
-    return requests.request(method, url, headers=_headers(token), timeout=timeout, **kwargs)
-
-
-def _existing_sha(token: str, base: str, rel: str) -> str | None:
-    resp = _api(token, "GET", f"{base}/contents/{rel}", params={"ref": BRANCH})
-    if resp.status_code == 404:
-        return None
-    resp.raise_for_status()
-    return resp.json().get("sha")
-
-
-def _upload_contents(token: str, base: str, rel: str, path: Path) -> None:
-    sha = _existing_sha(token, base, rel)
-    timeout = 600 if path.stat().st_size >= LARGE_FILE_BYTES else 180
-    payload = {
-        "message": COMMIT_MSG if sha is None else f"{COMMIT_MSG} ({rel})",
-        "content": _encode_file(path),
-        "branch": BRANCH,
-    }
-    if sha:
-        payload["sha"] = sha
-    resp = _api(token, "PUT", f"{base}/contents/{rel}", json=payload, timeout=timeout)
-    if resp.status_code == 409 and "Secret detected" in resp.text:
-        meta = resp.json().get("metadata", {})
-        bypasses = meta.get("secret_scanning", {}).get("bypass_placeholders", [])
-        if bypasses:
-            bypass_resp = _api(
-                token,
-                "POST",
-                f"{base}/secret-scanning/push-protection-bypasses",
-                json={
-                    "reason": "false_positive",
-                    "placeholder_id": bypasses[0]["placeholder_id"],
-                },
-            )
-            bypass_resp.raise_for_status()
-            resp = _api(token, "PUT", f"{base}/contents/{rel}", json=payload, timeout=timeout)
-    if not resp.ok:
-        detail = resp.text[:500]
-        raise RuntimeError(f"Upload failed for {rel}: HTTP {resp.status_code} — {detail}")
-    print(f"  pushed {rel} ({path.stat().st_size:,} bytes)")
+    kwargs.setdefault("timeout", 600)
+    return requests.request(method, url, headers=_headers(token), **kwargs)
 
 
 def main() -> None:
@@ -151,18 +121,61 @@ def main() -> None:
     if ref_resp.status_code == 404:
         raise SystemExit(f"Branch {BRANCH} not found on {OWNER}/{REPO}")
     ref_resp.raise_for_status()
-    print(f"Base commit: {ref_resp.json()['object']['sha'][:8]}")
-
+    base_commit = ref_resp.json()["object"]["sha"]
     print(f"Pushing from: {PROJECT_ROOT}")
-    print(f"(not from EngageIQ_Final_Submission — repo source is EngageIQ_Final only)")
+    print(f"Base commit: {base_commit[:8]}")
 
     files = _collect_files(PROJECT_ROOT)
-    print(f"Uploading {len(files)} files via Contents API...")
+    print(f"Uploading {len(files)} files...")
 
+    tree_entries: list[dict] = []
     for path in files:
         rel = path.relative_to(PROJECT_ROOT).as_posix()
-        _upload_contents(token, base, rel, path)
+        content, enc = _file_content(path)
+        blob_resp = _api(
+            token,
+            "POST",
+            f"{base}/git/blobs",
+            json={"content": content, "encoding": enc},
+        )
+        if not blob_resp.ok:
+            detail = blob_resp.text[:500]
+            raise RuntimeError(f"Blob failed for {rel}: HTTP {blob_resp.status_code} — {detail}")
+        tree_entries.append(
+            {
+                "path": rel,
+                "mode": "100644",
+                "type": "blob",
+                "sha": blob_resp.json()["sha"],
+            }
+        )
+        print(f"  blob {rel} ({path.stat().st_size:,} bytes)")
 
+    tree_resp = _api(token, "POST", f"{base}/git/trees", json={"tree": tree_entries})
+    tree_resp.raise_for_status()
+    tree_sha = tree_resp.json()["sha"]
+
+    commit_resp = _api(
+        token,
+        "POST",
+        f"{base}/git/commits",
+        json={
+            "message": COMMIT_MSG,
+            "tree": tree_sha,
+            "parents": [base_commit],
+        },
+    )
+    commit_resp.raise_for_status()
+    new_commit = commit_resp.json()["sha"]
+    print(f"New commit: {new_commit[:8]}")
+
+    update_resp = _api(
+        token,
+        "PATCH",
+        f"{base}/git/refs/heads/{BRANCH}",
+        json={"sha": new_commit, "force": False},
+    )
+    update_resp.raise_for_status()
     print(f"Pushed to https://github.com/{OWNER}/{REPO}")
     print("Streamlit Cloud should redeploy in ~2–3 minutes.")
 
