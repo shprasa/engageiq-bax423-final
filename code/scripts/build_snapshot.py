@@ -191,13 +191,19 @@ def main() -> None:
     paths = get_paths()
     out = Path(args.out) if args.out else paths.snapshot_csv
     synthetic = Path(args.synthetic) if args.synthetic else paths.data_dir / "opportunities_snapshot_synthetic.csv"
-    build_snapshot(
+    df = build_snapshot(
         out_csv=out,
         synthetic_csv=synthetic if synthetic.exists() else None,
         github_per_domain=args.github_per_domain,
         gharchive_hours=args.gharchive_hours,
         gharchive_max=args.gharchive_max,
     )
+
+    from engageiq.benchmark_ops import benchmark_summary, run_and_write_benchmarks
+
+    print("Running persona benchmarks on refreshed dataset…", flush=True)
+    payload = run_and_write_benchmarks(df, paths)
+    print(benchmark_summary(payload), flush=True)
 
 
 if __name__ == "__main__":

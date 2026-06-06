@@ -29,7 +29,7 @@ from engageiq.data_utils import (
 )
 from engageiq.domains import DOMAINS
 from engageiq.embedding import build_index
-from engageiq.benchmark_ops import persona_benchmark_row, run_and_write_benchmarks
+from engageiq.benchmark_ops import persona_benchmark_row, run_and_write_benchmarks, benchmark_summary
 from engageiq.profile_store import (
     delete_custom_profile,
     load_custom_profiles,
@@ -116,7 +116,7 @@ def _load_store_and_seed() -> tuple[OpportunityStore, dict]:
     _purge_stale_duckdb(paths.duckdb_path, paths.snapshot_csv)
     store = OpportunityStore(paths.duckdb_path, snapshot_csv=paths.snapshot_csv)
     store.ensure_loaded_from_snapshot(paths.snapshot_csv, initial_ingest=100000)
-    return store, {"paths": paths, "version": 17}
+    return store, {"paths": paths, "version": 18}
 
 
 @st.cache_resource
@@ -432,24 +432,29 @@ def main() -> None:
         else:
             st.caption(
                 "Snapshot mode: ranking uses real URLs saved from the last API refresh. "
-                "Turn off to browse the full offline grading dataset."
+                "Turn off to browse the full offline grading dataset. "
+                "**Refresh live API data now** also regenerates persona benchmarks."
             )
 
         if st.session_state.get("last_api_refresh_msg"):
             st.success(st.session_state.last_api_refresh_msg)
 
         if st.button("Refresh live API data now", use_container_width=True, type="primary"):
-            with st.spinner("Calling GitHub API + GitHub Archive…"):
-                try:
+            try:
+                with st.spinner("Calling GitHub API + GitHub Archive…"):
                     refreshed, result = merge_live_refresh(paths.snapshot_csv)
                     _write_snapshot_everywhere(refreshed, paths)
                     store._reload_from_csv(paths.snapshot_csv)
-                    st.session_state.last_api_refresh_msg = result.message
+                with st.spinner("Re-running persona benchmarks on updated dataset (~60s)…"):
+                    updated_df = store.load_df()
+                    payload = run_and_write_benchmarks(updated_df, paths)
+                    summary = benchmark_summary(payload)
+                    st.session_state.last_api_refresh_msg = f"{result.message} {summary}"
+                    st.session_state.last_benchmark_payload = payload
                     st.cache_resource.clear()
-                    st.success(result.message)
                     st.rerun()
-                except Exception as exc:
-                    st.error(f"Live refresh failed: {exc}")
+            except Exception as exc:
+                st.error(f"Live refresh failed: {exc}")
 
         english_only = st.toggle("English only", value=True)
 

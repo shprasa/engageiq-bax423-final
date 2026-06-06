@@ -43,3 +43,10 @@ def persona_benchmark_row(payload: dict, persona_name: str) -> dict | None:
         if row.get("persona") == persona_name:
             return row
     return None
+
+
+def benchmark_summary(payload: dict) -> str:
+    personas = payload.get("personas", [])
+    passed = sum(1 for p in personas if p.get("passed"))
+    custom = len(payload.get("custom_profiles", []))
+    return f"Benchmarks updated: {passed}/{len(personas)} personas passed ({custom} custom)."
